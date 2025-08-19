@@ -4,10 +4,6 @@ import ipywidgets as widgets
 from IPython.display import display
 from functools import partial
 
-from pymodbus.client import ModbusSerialClient
-import time
-
-
 class MKSMotor:
     def __init__(self, port, baudrate=38400, parity='N', stopbits=1, bytesize=8, timeout=1,
                  unit=1,
@@ -130,8 +126,6 @@ class MKSMotor:
 
     def close(self):
         self.client.close()
-
-
 
 class MotorControlUI:
     def __init__(self, motor):
