@@ -1,16 +1,25 @@
-# kamoer_pump_controller.py
+# kamoer_pump_controller.py (重构版/手动浮点数转换)
 
 import time
 import struct
-from pymodbus.client.serial import ModbusSerialClient
+from pymodbus.client import ModbusSerialClient
+# 已移除 BinaryPayloadBuilder 的导入
 from pymodbus.exceptions import ModbusException
 
 class KamoerPulseController:
     """
-    Kamoer 2802 脉冲发生控制板控制器
+    Kamoer 2802 脉冲发生控制板控制器 (重构版)
     """
 
     def __init__(self, port, unit=192, baudrate=9600, timeout=1):
+        """
+        初始化用于串口通讯的 Modbus 客户端。
+
+        :param port: 串口端口。
+        :param unit: 设备的 Modbus 从机地址。
+        :param baudrate: 波特率。
+        :param timeout: 通讯超时时间（秒）。
+        """
         self.client = ModbusSerialClient(
             port=port,
             baudrate=baudrate,
@@ -36,114 +45,114 @@ class KamoerPulseController:
         print("正在关闭连接。")
         self.client.close()
 
+    # --- 内部辅助函数 ---
+    def _write_coil(self, address, value):
+        """通用的写入线圈内部函数。"""
+        try:
+            response = self.client.write_coil(address, value, device_id=self.unit)
+            if response.isError():
+                raise ModbusException(f"写入线圈 {address} 失败")
+            return True
+        except ModbusException as e:
+            print(f"错误: {e}")
+            return False
+
+    def _write_multiple_registers(self, address, values):
+        """通用的写入多个寄存器内部函数。"""
+        try:
+            # 注意：此处的 values 预期是一个包含整数的列表 [reg1, reg2]
+            response = self.client.write_registers(address, values, device_id=self.unit)
+            if response.isError():
+                raise ModbusException(f"写入多个寄存器 {address} 失败")
+            return True
+        except ModbusException as e:
+            print(f"错误: {e}")
+            return False
+            
+    def _read_holding_registers(self, address, count):
+        """通用的读取保持寄存器内部函数。"""
+        try:
+            response = self.client.read_holding_registers(address, count, device_id=self.unit)
+            if response.isError():
+                raise ModbusException(f"读取寄存器 {address} 失败")
+            return response.registers
+        except ModbusException as e:
+            print(f"错误: {e}")
+            return None
+
+    # --- 公共控制函数 ---
     def enable_485_control(self, enable=True):
         """启用或禁用 485 通信控制。"""
         address = 0x1004
         action = "启用" if enable else "禁用"
         print(f"正在{action} 485 控制...")
-        try:
-            response = self.client.write_coil(address, enable, device_id=self.unit)
-            if hasattr(response, 'isError') and response.isError():
-                raise ModbusException(f"写入线圈 {address} 失败")
+        if self._write_coil(address, enable):
             print("485 控制设置成功。")
             return True
-        except Exception as e:
-            print(f"错误: {e}")
-            return False
+        return False
 
     def set_pump_state(self, start=True):
         """启动或停止泵。"""
         address = 0x1001
         action = "启动" if start else "停止"
         print(f"正在{action}泵...")
-        try:
-            response = self.client.write_coil(address, start, device_id=self.unit)
-            if hasattr(response, 'isError') and response.isError():
-                raise ModbusException(f"写入线圈 {address} 失败")
+        if self._write_coil(address, start):
             print("泵状态更改成功。")
             return True
-        except Exception as e:
-            print(f"错误: {e}")
-            return False
+        return False
 
     def set_direction(self, direction='forward'):
         """设置电机的旋转方向。"""
         address = 0x1003
         value = (direction.lower() == 'reverse')
         print(f"设置方向为 {'反转' if value else '正转'}...")
-        try:
-            response = self.client.write_coil(address, value, device_id=self.unit)
-            if hasattr(response, 'isError') and response.isError():
-                raise ModbusException(f"写入线圈 {address} 失败")
+        if self._write_coil(address, value):
             print("方向设置成功。")
             return True
-        except Exception as e:
-            print(f"错误: {e}")
-            return False
+        return False
 
     def set_speed(self, speed_rpm):
         """设置泵的目标转速。"""
-        address1 = 0x3001 # 高位寄存器
-        address2 = 0x3002 # 低位寄存器
+        address = 0x3001
         print(f"设置转速为 {speed_rpm} RPM...")
+        
         try:
-            # 手动将浮点数转换为两个16位寄存器值
+            # ## 使用手动方式将浮点数转换为两个16位寄存器值 ##
             float_bytes = struct.pack('>f', speed_rpm)
             reg1 = struct.unpack('>H', float_bytes[:2])[0]
             reg2 = struct.unpack('>H', float_bytes[2:])[0]
-            response = self.client.write_registers(address1, [reg1, reg2], device_id=self.unit)
-
-            if hasattr(response, 'isError') and response.isError():
-                raise ModbusException(f"写入寄存器 {address1} 失败")
-            print("转速设置成功。")
-            return True
+            payload = [reg1, reg2]
+            
+            if self._write_multiple_registers(address, payload):
+                print("转速设置成功。")
+                return True
+            return False
         except Exception as e:
-            print(f"错误: {e}")
+            print(f"转换浮点数时发生错误: {e}")
             return False
 
     def read_real_time_speed(self):
-            """读取泵的实时转速。"""
-            # 根据手册，即时转速储存在 0x3005 (高16位) 和 0x3006 (低16位)
-            address = 0x3005
-            print("正在读取实时转速...")
-            try:
-                response = self.client.read_holding_registers(
-                    address=address,
-                    count=2,  # 读取2个寄存器以组成一个32位元浮点数
-                    device_id=self.unit
-                )
-
-                if response.isError():
-                    raise ModbusException(f"读取寄存器 {address} 时设备返回错误: {response}")
-
-                # 检查是否成功读取到足够的数据
-                if not hasattr(response, 'registers') or len(response.registers) < 2:
-                    raise ModbusException("未能从设备读取到足够的寄存器数据")
-
-                # 手动将收到的两个16位元寄存器解码为一个32位元浮点数
-                # 根据手册，数据为大端序 (Big-Endian)
-                high_word_bytes = struct.pack('>H', response.registers[0])
-                low_word_bytes = struct.pack('>H', response.registers[1])
-                float_bytes = high_word_bytes + low_word_bytes
-                speed = struct.unpack('>f', float_bytes)[0]
-
-                print(f"当前转速是: {speed:.2f} RPM")
-                return speed
-                
-            except ModbusException as e:
-                # 捕捉并打印 Modbus 相关的错误 (包含通讯逾时)
-                print(f"读取转速时发生 Modbus 错误: {e}")
-                return None
-            except Exception as e:
-                # 捕捉其他可能的错误，例如数据解析失败
-                print(f"解析数据时发生意外错误: {e}")
-                return None
-
+        """读取泵的实时转速。"""
+        address = 0x3005
+        print("正在读取实时转速...")
+        
+        registers = self._read_holding_registers(address, 2)
+        
+        if registers and len(registers) >= 2:
+            high_word_bytes = struct.pack('>H', registers[0])
+            low_word_bytes = struct.pack('>H', registers[1])
+            float_bytes = high_word_bytes + low_word_bytes
+            speed = struct.unpack('>f', float_bytes)[0]
+            
+            print(f"当前转速是: {speed:.2f} RPM")
+            return speed
+        
+        return None
 
 
 # --- 使用示例 ---
 if __name__ == '__main__':
-    COM_PORT = 'COM3'  # 修改为您的实际串口
+    COM_PORT = 'COM_PORT'  # 修改为您的实际串口
     DEVICE_ADDRESS = 192
     BAUD_RATE = 9600
 

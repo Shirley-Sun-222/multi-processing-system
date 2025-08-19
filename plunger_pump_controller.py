@@ -50,7 +50,7 @@ class OushishengPlungerPump:
         """通用的写入寄存器内部函数。"""
         try:
             # 协议使用 0x06 功能码写入单一寄存器。
-            response = self.client.write_register(address, value, unit=self.unit)
+            response = self.client.write_register(address, value, device_id=self.unit)
             if response.isError():
                 raise ModbusException(f"写入寄存器 {address} 失败")
             return True
@@ -62,7 +62,7 @@ class OushishengPlungerPump:
         """通用的读取寄存器内部函数。"""
         try:
             # 协议使用 0x03 功能码读取寄存器。
-            response = self.client.read_holding_registers(address, 1, unit=self.unit)
+            response = self.client.read_holding_registers(address, 1, device_id=self.unit)
             if response.isError():
                 raise ModbusException(f"读取寄存器 {address} 失败")
             return response.registers[0]
@@ -228,7 +228,7 @@ class OushishengPlungerPump:
         print("请确保总线上只有一台设备！")
         
         try:
-            response = self.client.write_register(address, new_address, unit=universal_address)
+            response = self.client.write_register(address, new_address, device_id=universal_address)
             if response.isError():
                 raise ModbusException(f"设定新地址失败")
             print(f"地址设定成功。请使用新地址 {new_address} 与泵通讯。")
