@@ -7,7 +7,7 @@ from queue import Empty
 # 导入我们之前定义的泵的子类
 from kamoer_pump_controller import KamoerPeristalticPump
 from plunger_pump_controller import OushishengPlungerPump
-# from another_pump_controller import AnotherPeristalticPump # 如果有第二个蠕动泵类，也在这里导入
+from lange_pump_controller import LangePeristalticPump
 
 def pump_factory(config):
     """根据配置字典创建并返回相应的泵对象实例。"""
@@ -16,8 +16,8 @@ def pump_factory(config):
         return KamoerPeristalticPump(port=config['port'], unit_address=config['address'])
     elif pump_type == 'oushisheng':
         return OushishengPlungerPump(port=config['port'], unit_address=config['address'])
-    # elif pump_type == 'another_brand':
-    #     return AnotherPeristalticPump(port=config['port'], unit_address=config['address'])
+    elif pump_type == 'lange':
+        return LangePeristalticPump(port=config['port'], unit_address=config['address'])
     else:
         raise ValueError(f"未知的泵类型: {pump_type}")
 

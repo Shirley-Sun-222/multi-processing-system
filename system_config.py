@@ -15,10 +15,10 @@ SYSTEM_A_CONFIG = {
         },
         {
             'id': 'peristaltic_2',
-            'type': 'another_brand', # 假设这是您的第二台不同品牌的蠕动泵
+            'type': 'lange', # 假设这是您的第二台不同品牌的蠕动泵
             'port': 'COM4',
             'address': 1,
-            'description': '另一品牌的蠕动泵'
+            'description': '兰格蠕动泵'
         },
         {
             'id': 'plunger_pump',
@@ -49,10 +49,10 @@ SYSTEM_B_CONFIG = {
         },
         {
             'id': 'peristaltic_2',
-            'type': 'another_brand',
+            'type': 'lange',
             'port': 'COM7',
             'address': 1,
-            'description': '另一品牌的蠕动泵'
+            'description': '兰格蠕动泵'
         },
         {
             'id': 'plunger_pump',
