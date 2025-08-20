@@ -121,14 +121,22 @@ class ControlPanel(QMainWindow):
         print(f"[{self.config['system_name']}-GUI] 已发送指令: {command}")
 
     def update_status_display(self):
-        """由 QTimer 定期调用，用于更新界面状态。"""
+        """由 QTimer 定期调用，用于更新界面状态或显示错误。"""
         try:
-            # 循环处理队列中所有积压的状态信息，只显示最新的
             status = None
             while not self.status_queue.empty():
                 status = self.status_queue.get_nowait()
             
             if status:
+                # --- 错误处理逻辑 ---
+                if 'error' in status:
+                    # 如果状态字典中包含 'error' 键，则显示错误弹窗
+                    error_msg = status['error']
+                    QMessageBox.critical(self, "操作失败", error_msg)
+                    return # 显示错误后，不再执行下面的状态更新
+                # --- 错误处理结束 ---
+
+                # (如果没有错误，则执行常规的状态更新)
                 # 更新蠕动泵 1 的状态
                 p1_status = status['pumps'].get('peristaltic_1', {})
                 p1_running = p1_status.get('is_running', False)
@@ -142,7 +150,6 @@ class ControlPanel(QMainWindow):
                 self.plunger_status_label.setText(f"状态: {'运行中' if pl_running else '已停止'} | 流量: {pl_flow:.3f}")
 
         except Empty:
-            # 队列为空是正常情况
             pass
         except Exception as e:
             print(f"[{self.config['system_name']}-GUI] 更新状态时出错: {e}")

@@ -37,13 +37,12 @@ class BasePump:
         """断开与设备的连接。"""
         raise NotImplementedError("子类必须实现 disconnect 方法")
 
-    def start(self, **kwargs):
+    def set_parameters(self, **kwargs):
         """
-        启动泵的运行。
-
-        :param kwargs: 可选参数，例如 {'speed': 100, 'direction': 'forward'} 或 {'flow_rate': 5.0}
+        在线设置泵的运行参数。
+        :param kwargs: 参数字典，例如 {'speed': 150.0} 或 {'flow_rate': 7.5}
         """
-        raise NotImplementedError("子类必须实现 start 方法")
+        raise NotImplementedError("子类必须实现 set_parameters 方法")
 
     def stop(self):
         """停止泵的运行。"""
@@ -56,4 +55,6 @@ class BasePump:
         :return: 一个包含状态信息的字典，例如 {'is_running': True, 'speed': 99.8}
         """
         raise NotImplementedError("子类必须实现 get_status 方法")
+    
+
 

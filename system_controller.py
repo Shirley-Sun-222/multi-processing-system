@@ -98,8 +98,24 @@ class SystemController:
         print(f"[{self.config['system_name']}] 收到指令: {cmd_type}，参数: {params}")
 
         if cmd_type == 'start_process':
-            # 这是一个高层指令的例子
-            # 例如，启动柱塞泵和一台蠕动泵
+            # --- 连接检查逻辑 ---
+            all_connected = True
+            error_message = ""
+            for pump_id, pump_obj in self.pumps.items():
+                if not pump_obj.is_connected:
+                    all_connected = False
+                    error_message = f"启动失败：设备 '{pump_id}' 未连接或初始化失败。"
+                    break # 发现一个未连接的就足够了
+
+            if not all_connected:
+                print(f"[{self.config['system_name']}] 错误: {error_message}")
+                # 将错误信息发送回 GUI
+                self.status_queue.put({'error': error_message})
+                return # 中断执行，不启动泵
+            # --- 检查结束 ---
+
+            # 如果所有设备都已连接，则正常执行
+            print(f"[{self.config['system_name']}] 连接检查通过，正在执行启动流程...")
             plunger = self.pumps.get('plunger_pump')
             peristaltic = self.pumps.get('peristaltic_1')
             if plunger and peristaltic:
@@ -112,8 +128,8 @@ class SystemController:
 
         elif cmd_type == 'shutdown':
             print(f"[{self.config['system_name']}] 收到关闭指令，准备退出...")
-            self._running = False # 设置标志，主循环将在下次迭代时退出
-    
+            self._running = False
+            
     def _publish_status(self):
         """收集所有设备的状态并放入状态队列。"""
         system_status = {
