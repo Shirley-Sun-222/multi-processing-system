@@ -1,196 +1,141 @@
-# kamoer_pump_controller.py (重构版/手动浮点数转换)
+'''
+# file: kamoer_pump_controller.py (继承 BasePump 的版本)
+
+Author: Xueli Sun
+Date: 2025.8.19
+Version:1.0
+
+Kamoer Peristaltic Pump Controller. Inherits from BasePump and implements the required interface.
+
+'''
 
 import time
 import struct
 from pymodbus.client import ModbusSerialClient
-# 已移除 BinaryPayloadBuilder 的导入
 from pymodbus.exceptions import ModbusException
+from base_pump import BasePump
 
-class KamoerPulseController:
+class KamoerPeristalticPump(BasePump):
     """
-    Kamoer 2802 脉冲发生控制板控制器 (重构版)
+    Kamoer 2802 脉冲发生控制板控制器。
+    此类继承自 BasePump，并实现了其定义的标准接口。
     """
-
-    def __init__(self, port, unit=192, baudrate=9600, timeout=1):
-        """
-        初始化用于串口通讯的 Modbus 客户端。
-
-        :param port: 串口端口。
-        :param unit: 设备的 Modbus 从机地址。
-        :param baudrate: 波特率。
-        :param timeout: 通讯超时时间（秒）。
-        """
+    def __init__(self, port, unit_address=192, baudrate=9600, timeout=1):
+        # 首先调用父类的 __init__ 方法
+        super().__init__(port, unit_address, baudrate)
+        # 然后进行自己的初始化
         self.client = ModbusSerialClient(
-            port=port,
-            baudrate=baudrate,
+            port=self.port,
+            baudrate=self.baudrate,
             timeout=timeout,
             parity='N',
             stopbits=1,
             bytesize=8
         )
-        self.unit = unit
 
+    # --- 实现 BasePump 的标准接口 ---
     def connect(self):
-        """建立与串口的连接。"""
-        print("正在连接设备...")
+        print(f"[{self.__class__.__name__}] 正在连接设备...")
         if self.client.connect():
-            print("连接成功。")
-            return True
+            self.is_connected = True
+            print(f"[{self.__class__.__name__}] 连接成功。")
+            # 启用485控制是该泵的特定初始化步骤
+            return self._enable_485_control(True)
         else:
-            print("连接失败。")
+            self.is_connected = False
+            print(f"[{self.__class__.__name__}] 连接失败。")
             return False
 
-    def close(self):
-        """关闭串口连接。"""
-        print("正在关闭连接。")
+    def disconnect(self):
+        print(f"[{self.__class__.__name__}] 正在关闭连接。")
         self.client.close()
+        self.is_connected = False
 
-    # --- 内部辅助函数 ---
-    def _write_coil(self, address, value):
-        """通用的写入线圈内部函数。"""
+    def start(self, speed=100.0, direction='forward'):
+        """
+        启动蠕动泵。
+
+        :param speed: 目标转速 (RPM)。
+        :param direction: 旋转方向 ('forward' 或 'reverse')。
+        """
+        print(f"[{self.__class__.__name__}] 正在启动泵，转速: {speed} RPM, 方向: {direction}...")
+        if not self.is_connected:
+            print("错误: 设备未连接。")
+            return False
+        
+        # 蠕动泵需要先设方向和速度，再启动
+        self._set_direction(direction)
+        time.sleep(0.1) # 短暂延时确保指令被处理
+        self._set_speed(speed)
+        time.sleep(0.1)
+        return self._set_pump_state(start=True)
+
+    def stop(self):
+        print(f"[{self.__class__.__name__}] 正在停止泵...")
+        return self._set_pump_state(start=False)
+
+    def get_status(self):
+        speed = self._read_real_time_speed()
+        # 对于这个泵，我们无法直接读取运行状态，但可以通过速度是否为零来近似判断
+        is_running = speed is not None and speed > 0.1 # 设定一个小的阈值
+        return {
+            "is_running": is_running,
+            "speed_rpm": speed if speed is not None else 0.0
+        }
+
+    # --- 内部辅助函数 (加上下划线表示内部使用) ---
+    def _enable_485_control(self, enable=True):
+        address = 0x1004
+        return self._write_coil(address, enable)
+
+    def _set_pump_state(self, start=True):
+        address = 0x1001
+        return self._write_coil(address, start)
+
+    def _set_direction(self, direction='forward'):
+        address = 0x1003
+        value = (direction.lower() == 'reverse')
+        return self._write_coil(address, value)
+
+    def _set_speed(self, speed_rpm):
+        address = 0x3001
         try:
-            response = self.client.write_coil(address, value, device_id=self.unit)
-            if response.isError():
-                raise ModbusException(f"写入线圈 {address} 失败")
-            return True
+            float_bytes = struct.pack('>f', float(speed_rpm))
+            reg1 = struct.unpack('>H', float_bytes[:2])[0]
+            reg2 = struct.unpack('>H', float_bytes[2:])[0]
+            return self._write_multiple_registers(address, [reg1, reg2])
+        except Exception as e:
+            print(f"[{self.__class__.__name__}] 转换浮点数时发生错误: {e}")
+            return False
+
+    def _read_real_time_speed(self):
+        address = 0x3005
+        registers = self._read_holding_registers(address, 2)
+        if registers:
+            float_bytes = struct.pack('>HH', *registers)
+            return struct.unpack('>f', float_bytes)[0]
+        return None
+
+    def _write_coil(self, address, value):
+        try:
+            r = self.client.write_coil(address, value, device_id=self.unit_address)
+            return not r.isError()
         except ModbusException as e:
-            print(f"错误: {e}")
+            print(f"[{self.__class__.__name__}] 错误: {e}")
             return False
 
     def _write_multiple_registers(self, address, values):
-        """通用的写入多个寄存器内部函数。"""
         try:
-            # 注意：此处的 values 预期是一个包含整数的列表 [reg1, reg2]
-            response = self.client.write_registers(address, values, device_id=self.unit)
-            if response.isError():
-                raise ModbusException(f"写入多个寄存器 {address} 失败")
-            return True
+            r = self.client.write_registers(address, values, device_id=self.unit_address)
+            return not r.isError()
         except ModbusException as e:
-            print(f"错误: {e}")
+            print(f"[{self.__class__.__name__}] 错误: {e}")
             return False
             
     def _read_holding_registers(self, address, count):
-        """通用的读取保持寄存器内部函数。"""
         try:
-            response = self.client.read_holding_registers(address, count, device_id=self.unit)
-            if response.isError():
-                raise ModbusException(f"读取寄存器 {address} 失败")
-            return response.registers
+            r = self.client.read_holding_registers(address, count, device_id=self.unit_address)
+            return None if r.isError() else r.registers
         except ModbusException as e:
-            print(f"错误: {e}")
+            print(f"[{self.__class__.__name__}] 错误: {e}")
             return None
-
-    # --- 公共控制函数 ---
-    def enable_485_control(self, enable=True):
-        """启用或禁用 485 通信控制。"""
-        address = 0x1004
-        action = "启用" if enable else "禁用"
-        print(f"正在{action} 485 控制...")
-        if self._write_coil(address, enable):
-            print("485 控制设置成功。")
-            return True
-        return False
-
-    def set_pump_state(self, start=True):
-        """启动或停止泵。"""
-        address = 0x1001
-        action = "启动" if start else "停止"
-        print(f"正在{action}泵...")
-        if self._write_coil(address, start):
-            print("泵状态更改成功。")
-            return True
-        return False
-
-    def set_direction(self, direction='forward'):
-        """设置电机的旋转方向。"""
-        address = 0x1003
-        value = (direction.lower() == 'reverse')
-        print(f"设置方向为 {'反转' if value else '正转'}...")
-        if self._write_coil(address, value):
-            print("方向设置成功。")
-            return True
-        return False
-
-    def set_speed(self, speed_rpm):
-        """设置泵的目标转速。"""
-        address = 0x3001
-        print(f"设置转速为 {speed_rpm} RPM...")
-        
-        try:
-            # ## 使用手动方式将浮点数转换为两个16位寄存器值 ##
-            float_bytes = struct.pack('>f', speed_rpm)
-            reg1 = struct.unpack('>H', float_bytes[:2])[0]
-            reg2 = struct.unpack('>H', float_bytes[2:])[0]
-            payload = [reg1, reg2]
-            
-            if self._write_multiple_registers(address, payload):
-                print("转速设置成功。")
-                return True
-            return False
-        except Exception as e:
-            print(f"转换浮点数时发生错误: {e}")
-            return False
-
-    def read_real_time_speed(self):
-        """读取泵的实时转速。"""
-        address = 0x3005
-        print("正在读取实时转速...")
-        
-        registers = self._read_holding_registers(address, 2)
-        
-        if registers and len(registers) >= 2:
-            high_word_bytes = struct.pack('>H', registers[0])
-            low_word_bytes = struct.pack('>H', registers[1])
-            float_bytes = high_word_bytes + low_word_bytes
-            speed = struct.unpack('>f', float_bytes)[0]
-            
-            print(f"当前转速是: {speed:.2f} RPM")
-            return speed
-        
-        return None
-
-
-# --- 使用示例 ---
-if __name__ == '__main__':
-    COM_PORT = 'COM_PORT'  # 修改为您的实际串口
-    DEVICE_ADDRESS = 192
-    BAUD_RATE = 9600
-
-    if COM_PORT == 'COM_PORT':
-        print("请先修改 COM_PORT 变量为您的实际串口。")
-    else:
-        controller = KamoerPulseController(
-            port=COM_PORT,
-            unit=DEVICE_ADDRESS,
-            baudrate=BAUD_RATE
-        )
-        if controller.connect():
-            try:
-                # 启用485控制
-                if not controller.enable_485_control(enable=True):
-                    raise RuntimeError("无法启用 485 控制，程序中止。")
-                time.sleep(1)
-
-                # 设置转速为 100 RPM
-                controller.set_speed(100.0)
-                time.sleep(1)
-
-                print("\n--- 启动泵，运行 5 秒 ---")
-                controller.set_pump_state(start=True)
-                time.sleep(2)
-                
-                # 读取实时转速
-                controller.read_real_time_speed()
-                time.sleep(3)
-
-                print("\n--- 停止泵 ---")
-                controller.set_pump_state(start=False)
-                time.sleep(1)
-                
-                # 停止后检查转速
-                controller.read_real_time_speed()
-                
-            except Exception as e:
-                print(f"操作过程中发生错误: {e}")
-            finally:
-                controller.close()
