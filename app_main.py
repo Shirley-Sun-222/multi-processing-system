@@ -1,153 +1,244 @@
-# file: app_main.py (支持三个泵的最终版)
+# file: app_main.py (日志、绘图、保存、电源UI最终版)
 
-# 导入必要的系统和多进程库
 import sys
 import multiprocessing
-import json # 用于解析协议文件
+import json
+import time
 from queue import Empty
-
-# 导入PyQt6的核心组件
+import pyqtgraph as pg
+from pyqtgraph.exporters import ImageExporter
+import pandas as pd
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, QGridLayout,
-                             QMessageBox, QTextEdit, QGroupBox, QFileDialog)
-from PyQt6.QtCore import QTimer
+                             QMessageBox, QTextEdit, QGroupBox, QFileDialog, QSplitter)
+from PyQt6.QtCore import QTimer, Qt
 
-# 导入我们自己编写的控制器、配置和示例协议
 from system_controller import SystemController
 from system_config import SYSTEM_A_CONFIG, SYSTEM_B_CONFIG
-from protocol import auto_protocol
+# 确保你有一个 protocol.py 文件，或者直接在这里定义一个示例
+try:
+    from protocol import auto_protocol
+except ImportError:
+    auto_protocol = [{"command": "delay", "duration": 1}]
 
 class ControlPanel(QMainWindow):
-    """
-    主控制面板窗口类。
-    每个实例都管理着一套独立的硬件系统（通过一个独立的后台进程）。
-    """
     def __init__(self, config):
         super().__init__()
-        # 保存传入的系统配置 (SYSTEM_A_CONFIG 或 SYSTEM_B_CONFIG)
         self.config = config
         self.setWindowTitle(f"{config['system_name']} 控制面板")
-        self.setGeometry(100, 100, 750, 480) # 稍微增加窗口高度以容纳第三个泵
+        self.setGeometry(100, 100, 900, 700)
 
-        # 初始化后台进程和通信队列的占位符
         self.process = None
         self.command_queue = None
         self.status_queue = None
+        self.log_queue = None
         
-        # 调用方法来构建界面和启动后台
+        self.start_time = time.time()
+        # 初始化数据存储结构
+        self.data = {'time': []}
+        for pump in self.config.get('pumps', []):
+            self.data[f"{pump['id']}_speed"] = []
+            self.data[f"{pump['id']}_flow"] = []
+        for ps in self.config.get('power_supplies', []):
+            for i in range(1, 5): # 假设最多4通道
+                 self.data[f"{ps['id']}_ch{i}_voltage"] = []
+                 self.data[f"{ps['id']}_ch{i}_current"] = []
+
         self._init_ui()
         self._start_backend()
 
     def _init_ui(self):
-        """
-        初始化并布局窗口中的所有UI控件。
-        """
-        # --- 1. 创建手动控制区域 ---
+        """重新布局UI以容纳日志和绘图。"""
+        # --- 创建控件 ---
+        # 手动控制区域
         manual_group = QGroupBox("手动独立控制")
-        grid = QGridLayout()
+        manual_layout = QGridLayout()
         
-        # 创建蠕动泵1的所有控件 (kamoer)
-        self.p1_label = QLabel(f"蠕动泵 1 ({self.config['pumps'][0]['description']})")
-        self.p1_speed_input = QLineEdit("100.0")
-        self.p1_set_button = QPushButton("设置转速")
-        self.p1_start_button = QPushButton("启动")
-        self.p1_stop_button = QPushButton("停止")
-        self.p1_status_label = QLabel("状态: 未知")
-        
-        # *** 新增部分开始 ***
-        # 创建蠕动泵2的所有控件 (lange)
-        self.p3_label = QLabel(f"蠕动泵 2 ({self.config['pumps'][1]['description']})")
-        self.p3_speed_input = QLineEdit("50.0") # 给一个不同的默认值
-        self.p3_set_button = QPushButton("设置转速")
-        self.p3_start_button = QPushButton("启动")
-        self.p3_stop_button = QPushButton("停止")
-        self.p3_status_label = QLabel("状态: 未知")
-        # *** 新增部分结束 ***
+        # 动态创建设备UI
+        self.device_widgets = {}
+        row = 0
+        for pump_conf in self.config.get('pumps', []):
+            p_id = pump_conf['id']
+            self.device_widgets[p_id] = {
+                'label': QLabel(f"泵: {pump_conf['description']}"),
+                'input': QLineEdit("100.0" if 'peristaltic' in p_id else "5.0"),
+                'set_btn': QPushButton("设置"),
+                'start_btn': QPushButton("启动"),
+                'stop_btn': QPushButton("停止"),
+                'status': QLabel("状态: 未知")
+            }
+            manual_layout.addWidget(self.device_widgets[p_id]['label'], row, 0)
+            manual_layout.addWidget(QLabel("转速/流量:"), row, 1)
+            manual_layout.addWidget(self.device_widgets[p_id]['input'], row, 2)
+            manual_layout.addWidget(self.device_widgets[p_id]['set_btn'], row, 3)
+            manual_layout.addWidget(self.device_widgets[p_id]['start_btn'], row, 4)
+            manual_layout.addWidget(self.device_widgets[p_id]['stop_btn'], row, 5)
+            manual_layout.addWidget(self.device_widgets[p_id]['status'], row, 6)
+            row += 1
 
-        # 创建柱塞泵的所有控件
-        self.p2_label = QLabel(f"柱塞泵 ({self.config['pumps'][2]['description']})")
-        self.p2_flow_input = QLineEdit("5.0")
-        self.p2_set_button = QPushButton("设置流量")
-        self.p2_start_button = QPushButton("启动")
-        self.p2_stop_button = QPushButton("停止")
-        self.p2_status_label = QLabel("状态: 未知")
+        for ps_conf in self.config.get('power_supplies', []):
+            ps_id = ps_conf['id']
+            self.device_widgets[ps_id] = {
+                'label': QLabel(f"电源: {ps_conf['description']}"),
+                'v_input': QLineEdit("5.0"),
+                'i_input': QLineEdit("1.0"),
+                'set_btn': QPushButton("设置CH1"),
+                'out_btn': QPushButton("打开总输出"),
+                'status': QLabel("状态: 未知")
+            }
+            ps_ch1_layout = QHBoxLayout()
+            ps_ch1_layout.addWidget(QLabel("CH1 V:")); ps_ch1_layout.addWidget(self.device_widgets[ps_id]['v_input'])
+            ps_ch1_layout.addWidget(QLabel("CH1 A:")); ps_ch1_layout.addWidget(self.device_widgets[ps_id]['i_input'])
+            manual_layout.addWidget(self.device_widgets[ps_id]['label'], row, 0)
+            manual_layout.addLayout(ps_ch1_layout, row, 1, 1, 2)
+            manual_layout.addWidget(self.device_widgets[ps_id]['set_btn'], row, 3)
+            manual_layout.addWidget(self.device_widgets[ps_id]['out_btn'], row, 4)
+            manual_layout.addWidget(self.device_widgets[ps_id]['status'], row, 6)
+            row += 1
 
-        # 将所有控件添加到网格布局中
-        grid.addWidget(self.p1_label, 0, 0); grid.addWidget(QLabel("转速(RPM):"), 0, 1); grid.addWidget(self.p1_speed_input, 0, 2); grid.addWidget(self.p1_set_button, 0, 3); grid.addWidget(self.p1_start_button, 0, 4); grid.addWidget(self.p1_stop_button, 0, 5); grid.addWidget(self.p1_status_label, 0, 6)
-        
-        # *** 新增部分开始 ***
-        # 将蠕动泵2的控件添加到第1行
-        grid.addWidget(self.p3_label, 1, 0); grid.addWidget(QLabel("转速(RPM):"), 1, 1); grid.addWidget(self.p3_speed_input, 1, 2); grid.addWidget(self.p3_set_button, 1, 3); grid.addWidget(self.p3_start_button, 1, 4); grid.addWidget(self.p3_stop_button, 1, 5); grid.addWidget(self.p3_status_label, 1, 6)
-        # *** 新增部分结束 ***
-        
-        # 将柱塞泵的控件移动到第2行
-        grid.addWidget(self.p2_label, 2, 0); grid.addWidget(QLabel("流量(ml/min):"), 2, 1); grid.addWidget(self.p2_flow_input, 2, 2); grid.addWidget(self.p2_set_button, 2, 3); grid.addWidget(self.p2_start_button, 2, 4); grid.addWidget(self.p2_stop_button, 2, 5); grid.addWidget(self.p2_status_label, 2, 6)
-        
-        grid.setColumnStretch(6, 1) 
-        manual_group.setLayout(grid)
+        manual_layout.setColumnStretch(6, 1)
+        manual_group.setLayout(manual_layout)
 
-        # --- 2. 自动化协议区域 (保持不变) ---
+        # 协议区域
         protocol_group = QGroupBox("自动化协议控制")
-        # (协议区域的控件创建和布局与之前完全相同，此处省略)
-        protocol_layout = QVBoxLayout()
-        self.protocol_editor = QTextEdit()
-        self.protocol_editor.setText(json.dumps(auto_protocol, indent=4))
-        protocol_button_layout = QHBoxLayout()
-        self.load_protocol_button = QPushButton("从文件加载协议...")
-        self.run_protocol_button = QPushButton("执行编辑器中的协议")
-        protocol_button_layout.addWidget(self.load_protocol_button)
-        protocol_button_layout.addWidget(self.run_protocol_button)
-        protocol_layout.addWidget(QLabel("协议编辑器 (JSON格式):"))
-        protocol_layout.addWidget(self.protocol_editor)
-        protocol_layout.addLayout(protocol_button_layout)
-        protocol_group.setLayout(protocol_layout)
-
-        # --- 3. 全局控制按钮 (保持不变) ---
+        protocol_layout = QHBoxLayout()
+        self.protocol_editor = QTextEdit(); self.protocol_editor.setText(json.dumps(auto_protocol, indent=4))
+        protocol_buttons_layout = QVBoxLayout()
+        self.load_protocol_button = QPushButton("从文件加载..."); self.run_protocol_button = QPushButton("执行协议")
+        self.save_data_button = QPushButton("保存数据 (CSV)"); self.save_chart_button = QPushButton("保存图表 (PNG)")
         self.stop_all_button = QPushButton("!! 全部紧急停止 !!")
         self.stop_all_button.setStyleSheet("background-color: #d9534f; color: white;")
+        protocol_buttons_layout.addWidget(self.load_protocol_button); protocol_buttons_layout.addWidget(self.run_protocol_button)
+        protocol_buttons_layout.addStretch(); protocol_buttons_layout.addWidget(self.save_data_button); protocol_buttons_layout.addWidget(self.save_chart_button); protocol_buttons_layout.addStretch(); protocol_buttons_layout.addWidget(self.stop_all_button)
+        protocol_layout.addWidget(self.protocol_editor); protocol_layout.addLayout(protocol_buttons_layout)
+        protocol_group.setLayout(protocol_layout)
 
-        # --- 4. 设置窗口主布局 (保持不变) ---
-        main_layout = QVBoxLayout()
-        main_layout.addWidget(manual_group)
-        main_layout.addWidget(protocol_group)
-        main_layout.addWidget(self.stop_all_button)
-        central_widget = QWidget()
-        central_widget.setLayout(main_layout)
+        # 绘图区域
+        plot_group = QGroupBox("实时数据图表")
+        self.plot_widget = pg.PlotWidget(); self.plot_widget.setBackground('w'); self.plot_widget.setLabel('left', '数值'); self.plot_widget.setLabel('bottom', '时间 (s)'); self.plot_widget.addLegend(); self.plot_widget.showGrid(x=True, y=True)
+        self.curves = {}
+        self.curves['p1_speed'] = self.plot_widget.plot(pen=pg.mkPen('b', width=2), name="泵1-速度")
+        self.curves['p2_speed'] = self.plot_widget.plot(pen=pg.mkPen('g', width=2), name="泵2-速度")
+        self.curves['p3_flow'] = self.plot_widget.plot(pen=pg.mkPen('r', width=2), name="泵3-流量")
+        self.curves['ps1_volt'] = self.plot_widget.plot(pen=pg.mkPen('c', width=2), name="电源-电压")
+        plot_layout = QVBoxLayout(); plot_layout.addWidget(self.plot_widget)
+        plot_group.setLayout(plot_layout)
+
+        # 日志区域
+        log_group = QGroupBox("后台日志")
+        self.log_display = QTextEdit(); self.log_display.setReadOnly(True)
+        log_layout = QVBoxLayout(); log_layout.addWidget(self.log_display)
+        log_group.setLayout(log_layout)
+
+        # --- 主布局 ---
+        top_splitter = QSplitter(Qt.Orientation.Horizontal); top_splitter.addWidget(manual_group); top_splitter.addWidget(protocol_group)
+        main_splitter = QSplitter(Qt.Orientation.Vertical); main_splitter.addWidget(top_splitter); main_splitter.addWidget(plot_group); main_splitter.addWidget(log_group); main_splitter.setSizes([150, 400, 150])
+        central_widget = QWidget(); layout = QVBoxLayout(central_widget); layout.addWidget(main_splitter)
         self.setCentralWidget(central_widget)
 
-        # --- 5. 连接控件的信号到处理函数(槽) ---
-        # 手动控制按钮的连接
-        self.p1_start_button.clicked.connect(lambda: self.on_start('peristaltic_1'))
-        self.p1_stop_button.clicked.connect(lambda: self.on_stop('peristaltic_1'))
-        self.p1_set_button.clicked.connect(lambda: self.on_set_params('peristaltic_1'))
+        # --- 连接信号与槽 ---
+        for pump_conf in self.config.get('pumps', []):
+            p_id = pump_conf['id']
+            self.device_widgets[p_id]['start_btn'].clicked.connect(lambda _, p=p_id: self.on_start(p))
+            self.device_widgets[p_id]['stop_btn'].clicked.connect(lambda _, p=p_id: self.on_stop(p))
+            self.device_widgets[p_id]['set_btn'].clicked.connect(lambda _, p=p_id: self.on_set_params(p))
         
-        # *** 新增部分开始 ***
-        # 连接蠕动泵2的按钮信号
-        self.p3_start_button.clicked.connect(lambda: self.on_start('peristaltic_2'))
-        self.p3_stop_button.clicked.connect(lambda: self.on_stop('peristaltic_2'))
-        self.p3_set_button.clicked.connect(lambda: self.on_set_params('peristaltic_2'))
-        # *** 新增部分结束 ***
+        for ps_conf in self.config.get('power_supplies', []):
+            ps_id = ps_conf['id']
+            self.device_widgets[ps_id]['set_btn'].clicked.connect(self.on_set_power_ch1)
+            self.device_widgets[ps_id]['out_btn'].clicked.connect(self.on_toggle_power_output)
 
-        self.p2_start_button.clicked.connect(lambda: self.on_start('plunger_pump'))
-        self.p2_stop_button.clicked.connect(lambda: self.on_stop('plunger_pump'))
-        self.p2_set_button.clicked.connect(lambda: self.on_set_params('plunger_pump'))
-        
-        # 全局和协议按钮的连接 (保持不变)
         self.stop_all_button.clicked.connect(self.on_stop_all)
         self.load_protocol_button.clicked.connect(self.on_load_protocol_from_file)
         self.run_protocol_button.clicked.connect(self.on_run_protocol)
+        self.save_data_button.clicked.connect(self.on_save_data)
+        self.save_chart_button.clicked.connect(self.on_save_chart)
 
     def _start_backend(self):
-        # (此方法无需改动)
-        self.command_queue = multiprocessing.Queue(); self.status_queue = multiprocessing.Queue()
-        controller = SystemController(self.config, self.command_queue, self.status_queue)
-        self.process = multiprocessing.Process(target=controller.run); self.process.start()
-        self.timer = QTimer(self); self.timer.setInterval(500); self.timer.timeout.connect(self.update_status_display); self.timer.start()
+        """启动后台进程，并传入所有三个队列。"""
+        self.command_queue = multiprocessing.Queue()
+        self.status_queue = multiprocessing.Queue()
+        self.log_queue = multiprocessing.Queue()
+        
+        controller = SystemController(self.config, self.command_queue, self.status_queue, self.log_queue)
+        self.process = multiprocessing.Process(target=controller.run)
+        self.process.start()
 
-    # --- 事件处理函数(槽) ---
+        self.timer = QTimer(self)
+        self.timer.setInterval(500)
+        self.timer.timeout.connect(self.update_ui)
+        self.timer.start()
+        
+    def update_ui(self):
+        """由定时器定期调用，更新所有UI元素。"""
+        # 1. 更新日志
+        try:
+            while not self.log_queue.empty():
+                message = self.log_queue.get_nowait()
+                if message == "STOP":
+                    self.log_display.append("<font color='red'>--- 后台进程已停止 ---</font>")
+                    self.timer.stop(); break
+                self.log_display.append(message)
+                self.log_display.verticalScrollBar().setValue(self.log_display.verticalScrollBar().maximum())
+        except Empty: pass
 
+        # 2. 更新状态和图表
+        try:
+            status = None
+            while not self.status_queue.empty(): status = self.status_queue.get_nowait()
+            if status:
+                if 'error' in status: QMessageBox.critical(self, "后台错误", status['error']); return
+                if 'info' in status: QMessageBox.information(self, "后台通知", status['info'])
+                
+                elapsed_time = time.time() - self.start_time
+                self.data['time'].append(elapsed_time)
+
+                # 更新泵
+                for pump_conf in self.config.get('pumps', []):
+                    p_id = pump_conf['id']
+                    p_status = status['pumps'].get(p_id, {})
+                    self.device_widgets[p_id]['status'].setText(f"状态: {'运行中' if p_status.get('is_running') else '已停止'} | 值: {p_status.get('speed_rpm', p_status.get('flow_rate_ml_min', 0.0)):.2f}")
+                    self.data[f"{p_id}_speed"].append(p_status.get('speed_rpm', 0.0))
+                    self.data[f"{p_id}_flow"].append(p_status.get('flow_rate_ml_min', 0.0))
+
+                # 更新电源
+                for ps_conf in self.config.get('power_supplies', []):
+                    ps_id = ps_conf['id']
+                    ps_status = status['power_supplies'].get(ps_id, {})
+                    if ps_status:
+                        output_on = ps_status.get('output_on', False)
+                        ch1_v = ps_status.get('ch1_voltage', 0.0)
+                        ch1_i = ps_status.get('ch1_current', 0.0)
+                        self.device_widgets[ps_id]['out_btn'].setText("关闭总输出" if output_on else "打开总输出")
+                        self.device_widgets[ps_id]['out_btn'].setStyleSheet("background-color: #5cb85c; color: white;" if output_on else "")
+                        self.device_widgets[ps_id]['status'].setText(f"总输出: {'ON' if output_on else 'OFF'} | CH1: {ch1_v:.3f}V / {ch1_i:.3f}A")
+                        self.data[f"{ps_id}_ch1_voltage"].append(ch1_v)
+                        self.data[f"{ps_id}_ch1_current"].append(ch1_i)
+
+                # 更新图表
+                self.curves['p1_speed'].setData(self.data['time'], self.data['peristaltic_1_speed'])
+                self.curves['p2_speed'].setData(self.data['time'], self.data['peristaltic_2_speed'])
+                self.curves['p3_flow'].setData(self.data['time'], self.data['plunger_pump_flow'])
+                self.curves['ps1_volt'].setData(self.data['time'], self.data['gpd_power_1_ch1_voltage'])
+
+        except Empty: pass
+        except Exception as e: print(f"[{self.config['system_name']}-GUI] 更新UI时出错: {e}")
+
+    # --- 其他槽函数 ---
+    def on_save_data(self):
+        filename, _ = QFileDialog.getSaveFileName(self, "保存数据", "", "CSV Files (*.csv)")
+        if filename:
+            try: pd.DataFrame(self.data).to_csv(filename, index=False); QMessageBox.information(self, "成功", f"数据已保存到 {filename}")
+            except Exception as e: QMessageBox.critical(self, "错误", f"保存数据失败: {e}")
+
+    def on_save_chart(self):
+        filename, _ = QFileDialog.getSaveFileName(self, "保存图表", "", "PNG Files (*.png);;JPG Files (*.jpg)")
+        if filename:
+            try: ImageExporter(self.plot_widget.plotItem).export(filename); QMessageBox.information(self, "成功", f"图表已保存到 {filename}")
+            except Exception as e: QMessageBox.critical(self, "错误", f"保存图表失败: {e}")
+            
+    # ... (其他槽函数 on_start, on_stop 等保持不变) ...
     def on_load_protocol_from_file(self):
-        # (此方法无需改动)
         file_name, _ = QFileDialog.getOpenFileName(self, "选择协议文件", "", "JSON Files (*.json);;All Files (*)")
         if file_name:
             try:
@@ -158,7 +249,6 @@ class ControlPanel(QMainWindow):
             except Exception as e: QMessageBox.critical(self, "文件读取错误", f"无法读取文件: {e}")
 
     def on_run_protocol(self):
-        # (此方法无需改动)
         try:
             protocol_list = json.loads(self.protocol_editor.toPlainText())
             if not isinstance(protocol_list, list): raise ValueError("协议必须是一个列表")
@@ -168,77 +258,52 @@ class ControlPanel(QMainWindow):
         except Exception as e: QMessageBox.critical(self, "协议格式或内容错误", str(e))
 
     def on_start(self, pump_id):
-        # *** 核心修改处 ***
         try:
             params = {'pump_id': pump_id}
-            if pump_id == 'peristaltic_1':
-                params['speed'] = float(self.p1_speed_input.text())
-            elif pump_id == 'peristaltic_2': # 新增分支
-                params['speed'] = float(self.p3_speed_input.text())
-            elif pump_id == 'plunger_pump':
-                params['flow_rate'] = float(self.p2_flow_input.text())
-            
+            widget_set = self.device_widgets[pump_id]
+            if 'speed' in pump_id: params['speed'] = float(widget_set['input'].text())
+            elif 'plunger' in pump_id: params['flow_rate'] = float(widget_set['input'].text())
             self.command_queue.put({'type': 'start_pump', 'params': params})
-        except ValueError:
-            QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
+        except ValueError: QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
 
-    def on_stop(self, pump_id):
-        # (此方法无需改动)
-        self.command_queue.put({'type': 'stop_pump', 'params': {'pump_id': pump_id}})
+    def on_stop(self, pump_id): self.command_queue.put({'type': 'stop_pump', 'params': {'pump_id': pump_id}})
 
     def on_set_params(self, pump_id):
-        # *** 核心修改处 ***
         try:
             params = {'pump_id': pump_id}
-            if pump_id == 'peristaltic_1':
-                params['speed'] = float(self.p1_speed_input.text())
-            elif pump_id == 'peristaltic_2': # 新增分支
-                params['speed'] = float(self.p3_speed_input.text())
-            elif pump_id == 'plunger_pump':
-                params['flow_rate'] = float(self.p2_flow_input.text())
-            
+            widget_set = self.device_widgets[pump_id]
+            if 'speed' in pump_id: params['speed'] = float(widget_set['input'].text())
+            elif 'plunger' in pump_id: params['flow_rate'] = float(widget_set['input'].text())
             self.command_queue.put({'type': 'set_pump_params', 'params': params})
-        except ValueError:
-            QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
+        except ValueError: QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
     
-    def on_stop_all(self):
-        # (此方法无需改动)
-        self.command_queue.put({'type': 'stop_all'})
+    def on_stop_all(self): self.command_queue.put({'type': 'stop_all'})
 
-    def update_status_display(self):
-        # *** 核心修改处 ***
+    def on_set_power_ch1(self):
         try:
-            status = None
-            while not self.status_queue.empty(): status = self.status_queue.get_nowait()
-            
-            if status:
-                if 'error' in status: QMessageBox.critical(self, "后台错误", status['error']); return
-                if 'info' in status: QMessageBox.information(self, "后台通知", status['info'])
-                
-                # 更新蠕动泵1的状态
-                p1_status = status['pumps'].get('peristaltic_1', {})
-                self.p1_status_label.setText(f"状态: {'运行中' if p1_status.get('is_running') else '已停止'} | 转速: {p1_status.get('speed_rpm', 0.0):.2f}")
-                
-                # 新增：更新蠕动泵2的状态
-                p3_status = status['pumps'].get('peristaltic_2', {})
-                self.p3_status_label.setText(f"状态: {'运行中' if p3_status.get('is_running') else '已停止'} | 转速: {p3_status.get('speed_rpm', 0.0):.2f}")
+            ps_id = self.config['power_supplies'][0]['id']
+            widget_set = self.device_widgets[ps_id]
+            voltage = float(widget_set['v_input'].text())
+            current = float(widget_set['i_input'].text())
+            self.command_queue.put({'type': 'set_power_voltage','params': {'device_id': ps_id, 'channel': 1, 'voltage': voltage}})
+            self.command_queue.put({'type': 'set_power_current','params': {'device_id': ps_id, 'channel': 1, 'current': current}})
+        except ValueError: QMessageBox.warning(self, "输入错误", "请输入有效的电压和电流值！")
 
-                # 更新柱塞泵的状态
-                p2_status = status['pumps'].get('plunger_pump', {})
-                self.p2_status_label.setText(f"状态: {'运行中' if p2_status.get('is_running') else '已停止'} | 流量: {p2_status.get('flow_rate_ml_min', 0.0):.3f}")
-        except Empty: pass
-        except Exception as e: print(f"[{self.config['system_name']}-GUI] 更新状态时出错: {e}")
+    def on_toggle_power_output(self):
+        ps_id = self.config['power_supplies'][0]['id']
+        widget_set = self.device_widgets[ps_id]
+        enable = widget_set['out_btn'].text() == "打开总输出"
+        self.command_queue.put({'type': 'set_power_output','params': {'device_id': ps_id, 'enable': enable}})
 
     def closeEvent(self, event):
-        # (此方法无需改动)
-        self.timer.stop();
+        self.timer.stop()
         if self.process and self.process.is_alive():
             self.command_queue.put({'type': 'shutdown'}); self.process.join(timeout=5)
             if self.process.is_alive(): self.process.terminate()
         event.accept()
 
+# --- MainApp 和主程序入口 (保持不变) ---
 class MainApp(QMainWindow):
-    # (此类无需改动)
     def __init__(self):
         super().__init__(); self.setWindowTitle("多系统泵控制程序"); self.setGeometry(300, 300, 300, 150); self.control_windows = {}
         layout = QVBoxLayout(); self.btn_sys_a = QPushButton("打开 系统 A 控制面板"); self.btn_sys_a.clicked.connect(lambda: self.open_control_panel('A', SYSTEM_A_CONFIG)); self.btn_sys_b = QPushButton("打开 系统 B 控制面板"); self.btn_sys_b.clicked.connect(lambda: self.open_control_panel('B', SYSTEM_B_CONFIG)); layout.addWidget(self.btn_sys_a); layout.addWidget(self.btn_sys_b)
@@ -247,9 +312,7 @@ class MainApp(QMainWindow):
         if system_id in self.control_windows and self.control_windows[system_id].isVisible(): self.control_windows[system_id].activateWindow()
         else: self.control_windows[system_id] = ControlPanel(config); self.control_windows[system_id].show()
 
-# --- 程序主入口 ---
 if __name__ == '__main__':
-    # (此部分无需改动)
     multiprocessing.freeze_support()
     app = QApplication(sys.argv)
     main_window = MainApp()

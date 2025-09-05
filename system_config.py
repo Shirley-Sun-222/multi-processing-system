@@ -28,10 +28,15 @@ SYSTEM_A_CONFIG = {
             'description': '欧世盛柱塞泵'
         }
     ],
-    'power_supply': {
-        'port': 'COM5'
-        # ... 其他电源相关配置
-    }
+    'power_supplies': [
+        {
+            'id': 'gpd_power_1',
+            'type': 'gpd_4303s',
+            # USB连接通常会被识别为一个COM口，您需要在设备管理器中查看
+            'port': 'COM5', # ！！！修改为电源的实际串口
+            'description': '固纬 GPD-4303S 电源'
+        }
+    ]
 }
 
 # ==========================================================
@@ -62,7 +67,12 @@ SYSTEM_B_CONFIG = {
             'description': '欧世盛柱塞泵'
         }
     ],
-    'power_supply': {
-        'port': 'COM8'
-    }
+    'power_supplies': [
+        {
+            'id': 'gpd_power_1',
+            'type': 'gpd_4303s',
+            'port': 'COM8', # ！！！修改为电源的实际串口
+            'description': '固纬 GPD-4303S 电源'
+        }
+    ]
 }
