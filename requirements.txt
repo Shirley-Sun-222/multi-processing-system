@@ -1,0 +1,6 @@
+pyqt6
+pymodbus
+pyvisa
+pyvisa-py
+pyqtgraph
+pandas
