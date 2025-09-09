@@ -110,11 +110,23 @@ class KamoerPeristalticPump(BasePump):
 
     def _read_real_time_speed(self):
         address = 0x3005
-        registers = self._read_holding_registers(address, 2)
-        if registers:
+        
+        # ★★★ 修改点：将一次性读2个寄存器，改为分两次、每次读1个 ★★★
+        
+        # registers = self._read_holding_registers(address, 2) # 这是旧的、有问题的代码行
+        
+        reg1 = self._read_holding_registers(address, 1)
+        reg2 = self._read_holding_registers(address + 1, 1) # 读取下一个地址的寄存器
+
+        # 确保两次都读取成功
+        if reg1 is not None and reg2 is not None:
+            # pymodbus 默认返回列表，需要从中取出单个值
+            registers = [reg1[0], reg2[0]] 
             float_bytes = struct.pack('>HH', *registers)
             return struct.unpack('>f', float_bytes)[0]
+            
         return None
+
 
     def _write_coil(self, address, value):
         try:

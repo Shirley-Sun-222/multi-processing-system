@@ -1,77 +1,64 @@
-# file: system_config.py
+# file: system_config.py (设备池最终版)
 
 # ==========================================================
-# 系统 A 的硬件配置
+# 全局设备资源池
+# 在这里列出您拥有的所有硬件设备及其连接信息。
 # ==========================================================
-SYSTEM_A_CONFIG = {
-    'system_name': 'System A',
-    'pumps': [
+DEVICE_POOL = {
+    # 蠕动泵 (请确保 'id' 是唯一的)
+    "pumps": [
         {
-            'id': 'peristaltic_1', # 给设备起一个唯一的内部名字
-            'type': 'kamoer',     # 与 pump_factory 中的类型匹配
-            'port': 'COM3',       # ！！！修改为系统 A 的实际串口
-            'address': 192,
-            'description': '卡默尔蠕动泵'
-        },
-        {
-            'id': 'peristaltic_2',
-            'type': 'lange', # 假设这是您的第二台不同品牌的蠕动泵
-            'port': 'COM4',
-            'address': 1,
-            'description': '兰格蠕动泵'
-        },
-        {
-            'id': 'plunger_pump',
-            'type': 'oushisheng', # 与 pump_factory 中的类型匹配
-            'port': 'COM3',       # 假设与卡默尔泵在同一 RS485 总线
-            'address': 1,
-            'description': '欧世盛柱塞泵'
-        }
-    ],
-    'power_supplies': [
-        {
-            'id': 'gpd_power_1',
-            'type': 'gpd_4303s',
-            # USB连接通常会被识别为一个COM口，您需要在设备管理器中查看
-            'port': 'COM5', # ！！！修改为电源的实际串口
-            'description': '固纬 GPD-4303S 电源'
-        }
-    ]
-}
-
-# ==========================================================
-# 系统 B 的硬件配置 (与系统 A 结构相同，但参数不同)
-# ==========================================================
-SYSTEM_B_CONFIG = {
-    'system_name': 'System B',
-    'pumps': [
-        {
-            'id': 'peristaltic_1',
+            'id': 'kamoer_pump_1',
             'type': 'kamoer',
-            'port': 'COM6', # ！！！修改为系统 B 的实际串口
+            'port': 'COM5',       # ！！！修改为1号Kamoer泵的实际串口
             'address': 192,
-            'description': '卡默尔蠕动泵'
+            'description': '卡默尔蠕动泵 #1'
         },
         {
-            'id': 'peristaltic_2',
-            'type': 'lange',
-            'port': 'COM7',
-            'address': 1,
-            'description': '兰格蠕动泵'
+            'id': 'kamoer_pump_2',
+            'type': 'kamoer',
+            'port': 'COM4',       # ！！！修改为2号Kamoer泵的实际串口
+            'address': 192,
+            'description': '卡默尔蠕动泵 #2'
         },
         {
-            'id': 'plunger_pump',
+            'id': 'kamoer_pump_3',
+            'type': 'kamoer',
+            'port': 'COM5',       # ！！！修改为3号Kamoer泵的实际串口
+            'address': 192,
+            'description': '卡默尔蠕动泵 #3'
+        },
+        {
+            'id': 'kamoer_pump_4',
+            'type': 'kamoer',
+            'port': 'COM6',       # ！！！修改为4号Kamoer泵的实际串口
+            'address': 192,
+            'description': '卡默尔蠕动泵 #4'
+        },
+
+        # 柱塞泵
+        {
+            'id': 'plunger_pump_1',
             'type': 'oushisheng',
-            'port': 'COM6',
+            'port': 'COM7',       # ！！！修改为1号柱塞泵的实际串口
             'address': 1,
-            'description': '欧世盛柱塞泵'
+            'description': '欧世盛柱塞泵 #1'
+        },
+        {
+            'id': 'plunger_pump_2',
+            'type': 'oushisheng',
+            'port': 'COM8',       # ！！！修改为2号柱塞泵的实际串口
+            'address': 1,
+            'description': '欧世盛柱塞泵 #2'
         }
     ],
-    'power_supplies': [
+
+    # 电源供应器
+    "power_supplies": [
         {
             'id': 'gpd_power_1',
             'type': 'gpd_4303s',
-            'port': 'COM8', # ！！！修改为电源的实际串口
+            'port': 'COM9', # ！！！修改为电源的实际串口
             'description': '固纬 GPD-4303S 电源'
         }
     ]

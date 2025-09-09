@@ -6,7 +6,7 @@ from queue import Empty
 
 from kamoer_pump_controller import KamoerPeristalticPump
 from plunger_pump_controller import OushishengPlungerPump
-from lange_pump_controller import LangePeristalticPump
+# from lange_pump_controller import LangePeristalticPump
 from power_supply_controller import GPD4303SPowerSupply
 
 def device_factory(config):
@@ -16,100 +16,46 @@ def device_factory(config):
         return KamoerPeristalticPump(port=config['port'], unit_address=config['address'])
     elif device_type == 'oushisheng':
         return OushishengPlungerPump(port=config['port'], unit_address=config['address'])
-    elif device_type == 'lange':
-        return LangePeristalticPump(port=config['port'], unit_address=config['address'])
+    # elif device_type == 'lange':
+    #     return LangePeristalticPump(port=config['port'], unit_address=config['address'])
     elif device_type == 'gpd_4303s':
         return GPD4303SPowerSupply(port=config['port'])
     else:
         raise ValueError(f"未知的设备类型: {device_type}")
 
 class SystemController:
-    def __init__(self, config, command_queue, status_queue, log_queue):
-        self.config = config
+    # 核心修改：__init__ 现在接收一个动态的设备配置列表
+    def __init__(self, device_configs, command_queue, status_queue, log_queue):
+        self.device_configs = device_configs
         self.command_queue = command_queue
         self.status_queue = status_queue
         self.log_queue = log_queue
-        self.pumps = {}
-        self.power_supplies = {}
+        self.devices = {} # 使用一个通用的字典来存储所有设备
         self._running = True
 
     def _log(self, message):
-        """将日志消息同时打印到控制台并放入日志队列。"""
         print(message)
-        if self.log_queue:
-            self.log_queue.put(message)
+        if self.log_queue: self.log_queue.put(message)
 
-    # 只要一个设备连接失败，就关闭控制系统
-    
-    # def _setup_devices(self):
-    #     self._log(f"[{self.config['system_name']}] 正在设置设备...")
-    #     try:
-    #         if 'pumps' in self.config:
-    #             for pump_config in self.config['pumps']:
-    #                 self.pumps[pump_config['id']] = device_factory(pump_config)
-            
-    #         if 'power_supplies' in self.config:
-    #             for ps_config in self.config['power_supplies']:
-    #                 self.power_supplies[ps_config['id']] = device_factory(ps_config)
-
-    #         all_devices = list(self.pumps.values()) + list(self.power_supplies.values())
-    #         self._log(f"[{self.config['system_name']}] 正在连接所有设备...")
-    #         for device_obj in all_devices:
-    #             if not device_obj.connect():
-    #                 # connect 方法内部会打印失败信息
-    #                 raise ConnectionError(f"设备 {device_obj.__class__.__name__} on {device_obj.port} 连接失败。")
-            
-    #         self._log(f"[{self.config['system_name']}] 所有设备已连接并准备就绪。")
-    #         return True
-    #     except Exception as e:
-    #         self._log(f"[{self.config['system_name']}] 设备设置失败: {e}")
-    #         self._shutdown()
-    #         return False
-
-
-    # 当一个设备连接失败时，继续尝试连接其他设备。可用于调试。
-    
     def _setup_devices(self):
-        self._log(f"[{self.config['system_name']}] 正在设置设备...")
-        errors = []
-        # 创建设备对象
-        if 'pumps' in self.config:
-            for pump_config in self.config['pumps']:
-                try:
-                    self.pumps[pump_config['id']] = device_factory(pump_config)
-                except Exception as e:
-                    error_msg = f"泵 {pump_config.get('id', '')} 创建失败: {e}"
-                    self._log(error_msg)
-                    errors.append(error_msg)
-        if 'power_supplies' in self.config:
-            for ps_config in self.config['power_supplies']:
-                try:
-                    self.power_supplies[ps_config['id']] = device_factory(ps_config)
-                except Exception as e:
-                    error_msg = f"电源 {ps_config.get('id', '')} 创建失败: {e}"
-                    self._log(error_msg)
-                    errors.append(error_msg)
+        self._log(f"后台进程：正在设置动态分配的设备...")
+        try:
+            for config in self.device_configs:
+                dev_id = config['id']
+                self._log(f" -> 正在创建设备: {dev_id} ({config['type']})")
+                self.devices[dev_id] = device_factory(config)
 
-        # 连接设备
-        all_devices = list(self.pumps.values()) + list(self.power_supplies.values())
-        self._log(f"[{self.config['system_name']}] 正在连接所有设备...")
-        for device_obj in all_devices:
-            try:
-                if not device_obj.connect():
-                    error_msg = f"设备 {device_obj.__class__.__name__} on {getattr(device_obj, 'port', '?')} 连接失败。"
-                    self._log(error_msg)
-                    errors.append(error_msg)
-            except Exception as e:
-                error_msg = f"设备 {device_obj.__class__.__name__} on {getattr(device_obj, 'port', '?')} 连接异常: {e}"
-                self._log(error_msg)
-                errors.append(error_msg)
-
-        if errors:
-            self._log(f"[{self.config['system_name']}] 部分设备连接失败:\n" + "\n".join(errors))
-            # 不调用 self._shutdown()，让已连接设备继续工作
+            self._log(f"后台进程：正在连接所有设备...")
+            for dev_id, dev_obj in self.devices.items():
+                if not dev_obj.connect():
+                    raise ConnectionError(f"设备 {dev_id} 连接失败。")
+            
+            self._log(f"后台进程：所有已分配设备连接成功。")
+            return True
+        except Exception as e:
+            self._log(f"后台进程：设备设置失败: {e}")
+            self._shutdown()
             return False
-        self._log(f"[{self.config['system_name']}] 所有设备已连接并准备就绪。")
-        return True
 
     def run(self):
         if not self._setup_devices():
@@ -133,70 +79,45 @@ class SystemController:
         if self.log_queue: self.log_queue.put("STOP")
 
     def _process_command(self, command):
+        # 简化：所有设备都在一个字典里，通过ID查找
         cmd_type = command.get('type')
         params = command.get('params', {})
-        self._log(f"[{self.config['system_name']}] 收到指令: {cmd_type}，参数: {params}")
+        self._log(f"后台进程：收到指令: {cmd_type}，参数: {params}")
 
-        # --- 泵指令 ---
-        if cmd_type in ['start_pump', 'stop_pump', 'set_pump_params']:
-            pump_id = params.get('pump_id')
-            target_pump = self.pumps.get(pump_id)
-            if not target_pump:
-                self.status_queue.put({'error': f"指令失败：未找到ID为 '{pump_id}' 的泵。"})
-                return
-            if cmd_type == 'start_pump':
-                params.pop('pump_id', None)
-                target_pump.start(**params)
-            elif cmd_type == 'stop_pump':
-                target_pump.stop()
-            elif cmd_type == 'set_pump_params':
-                params.pop('pump_id', None)
-                target_pump.set_parameters(**params)
+        device_id = params.get('pump_id') or params.get('device_id')
+        target_device = self.devices.get(device_id)
+
+        if device_id and not target_device:
+            self.status_queue.put({'error': f"指令失败：未找到ID为 '{device_id}' 的设备。"})
+            return
         
-        # --- 电源指令 ---
-        elif cmd_type in ['set_power_voltage', 'set_power_current', 'set_power_output']:
-            ps_id = params.get('device_id')
-            target_ps = self.power_supplies.get(ps_id)
-            if not target_ps:
-                self.status_queue.put({'error': f"指令失败：未找到ID为 '{ps_id}' 的电源。"})
-                return
-            if cmd_type == 'set_power_voltage':
-                target_ps.set_voltage(params.get('channel'), params.get('voltage'))
-            elif cmd_type == 'set_power_current':
-                target_ps.set_current(params.get('channel'), params.get('current'))
-            elif cmd_type == 'set_power_output':
-                target_ps.set_output(params.get('enable'))
-        
-        # --- 协议指令 ---
-        elif cmd_type == 'run_protocol':
-            protocol = params.get('protocol')
-            if protocol:
-                threading.Thread(target=self._execute_protocol, args=(protocol,)).start()
-        
-        # --- 全局指令 ---
+        # (泵和电源的指令处理逻辑保持不变)
+        if cmd_type == 'start_pump': target_device.start(**params);
+        elif cmd_type == 'stop_pump': target_device.stop();
+        elif cmd_type == 'set_pump_params': target_device.set_parameters(**params);
+        elif cmd_type == 'set_power_voltage': target_device.set_voltage(params['channel'], params['voltage']);
+        elif cmd_type == 'set_power_current': target_device.set_current(params['channel'], params['current']);
+        elif cmd_type == 'set_power_output': target_device.set_output(params['enable']);
+        elif cmd_type == 'run_protocol': threading.Thread(target=self._execute_protocol, args=(command.get('protocol', []),)).start()
         elif cmd_type == 'stop_all':
-            for pump in self.pumps.values(): pump.stop()
-            for ps in self.power_supplies.values(): ps.set_output(enable=False)
-        elif cmd_type == 'shutdown':
-            self._running = False
-        else:
-            self._log(f"[{self.config['system_name']}] 收到未知指令: {cmd_type}")
+            for dev in self.devices.values():
+                if hasattr(dev, 'stop'): dev.stop()
+                if hasattr(dev, 'set_output'): dev.set_output(False)
+        elif cmd_type == 'shutdown': self._running = False
+        else: self._log(f"后台进程：收到未知指令: {cmd_type}")
 
     def _publish_status(self):
-        system_status = {'timestamp': time.time(), 'pumps': {}, 'power_supplies': {}}
-        for pump_id, pump_obj in self.pumps.items():
-            system_status['pumps'][pump_id] = pump_obj.get_status()
-        for ps_id, ps_obj in self.power_supplies.items():
-            system_status['power_supplies'][ps_id] = ps_obj.get_status()
+        system_status = {'timestamp': time.time(), 'devices': {}}
+        for dev_id, dev_obj in self.devices.items():
+            system_status['devices'][dev_id] = dev_obj.get_status()
         self.status_queue.put(system_status)
 
     def _shutdown(self):
-        all_devices = list(self.pumps.values()) + list(self.power_supplies.values())
-        self._log(f"[{self.config['system_name']}] 正在安全关闭所有设备...")
-        for device in all_devices:
+        self._log(f"后台进程：正在安全关闭所有设备...")
+        for device in self.devices.values():
             if hasattr(device, 'is_connected') and device.is_connected:
                 device.disconnect()
-        self._log(f"[{self.config['system_name']}] 已安全关闭。")
+        self._log(f"后台进程：已安全关闭。")
 
     def _execute_protocol(self, protocol):
         self._log(f"[{self.config['system_name']}] 开始执行自动化协议...")
