@@ -1,4 +1,4 @@
-# file: system_controller.py (修复完善版)
+# file: system_controller.py (已修复参数传递BUG的最终版)
 
 import time
 import threading
@@ -6,7 +6,6 @@ from queue import Empty
 
 from kamoer_pump_controller import KamoerPeristalticPump
 from plunger_pump_controller import OushishengPlungerPump
-# from lange_pump_controller import LangePeristalticPump
 from power_supply_controller import GPD4303SPowerSupply
 
 def device_factory(config):
@@ -16,21 +15,18 @@ def device_factory(config):
         return KamoerPeristalticPump(port=config['port'], unit_address=config['address'])
     elif device_type == 'oushisheng':
         return OushishengPlungerPump(port=config['port'], unit_address=config['address'])
-    # elif device_type == 'lange':
-    #     return LangePeristalticPump(port=config['port'], unit_address=config['address'])
     elif device_type == 'gpd_4303s':
         return GPD4303SPowerSupply(port=config['port'])
     else:
         raise ValueError(f"未知的设备类型: {device_type}")
 
 class SystemController:
-    # 核心修改：__init__ 现在接收一个动态的设备配置列表
     def __init__(self, device_configs, command_queue, status_queue, log_queue):
         self.device_configs = device_configs
         self.command_queue = command_queue
         self.status_queue = status_queue
         self.log_queue = log_queue
-        self.devices = {} # 使用一个通用的字典来存储所有设备
+        self.devices = {}
         self._running = True
 
     def _log(self, message):
@@ -79,7 +75,6 @@ class SystemController:
         if self.log_queue: self.log_queue.put("STOP")
 
     def _process_command(self, command):
-        # 简化：所有设备都在一个字典里，通过ID查找
         cmd_type = command.get('type')
         params = command.get('params', {})
         self._log(f"后台进程：收到指令: {cmd_type}，参数: {params}")
@@ -91,20 +86,34 @@ class SystemController:
             self.status_queue.put({'error': f"指令失败：未找到ID为 '{device_id}' 的设备。"})
             return
         
-        # (泵和电源的指令处理逻辑保持不变)
-        if cmd_type == 'start_pump': target_device.start(**params);
-        elif cmd_type == 'stop_pump': target_device.stop();
-        elif cmd_type == 'set_pump_params': target_device.set_parameters(**params);
-        elif cmd_type == 'set_power_voltage': target_device.set_voltage(params['channel'], params['voltage']);
-        elif cmd_type == 'set_power_current': target_device.set_current(params['channel'], params['current']);
-        elif cmd_type == 'set_power_output': target_device.set_output(params['enable']);
-        elif cmd_type == 'run_protocol': threading.Thread(target=self._execute_protocol, args=(command.get('protocol', []),)).start()
+        # ★★★ 核心修正：在传递前，从params字典中移除pump_id和device_id ★★★
+        # 创建一个只包含方法所需参数的新字典
+        filtered_params = {k: v for k, v in params.items() if k not in ['pump_id', 'device_id']}
+        
+        if cmd_type == 'start_pump':
+            target_device.start(**filtered_params)
+        elif cmd_type == 'stop_pump':
+            target_device.stop()
+        elif cmd_type == 'set_pump_params':
+            # set_pump_params 和 start_pump 在签名上可能不同，所以我们为它也使用 filtered_params
+            target_device.set_parameters(**filtered_params)
+        elif cmd_type == 'set_power_voltage':
+            target_device.set_voltage(params['channel'], params['voltage'])
+        elif cmd_type == 'set_power_current':
+            target_device.set_current(params['channel'], params['current'])
+        elif cmd_type == 'set_power_output':
+            target_device.set_output(params['enable'])
+        elif cmd_type == 'run_protocol':
+            # 注意: _execute_protocol 内部会再次调用 _process_command, 逻辑保持一致
+            threading.Thread(target=self._execute_protocol, args=(params.get('protocol', []),)).start()
         elif cmd_type == 'stop_all':
             for dev in self.devices.values():
                 if hasattr(dev, 'stop'): dev.stop()
                 if hasattr(dev, 'set_output'): dev.set_output(False)
-        elif cmd_type == 'shutdown': self._running = False
-        else: self._log(f"后台进程：收到未知指令: {cmd_type}")
+        elif cmd_type == 'shutdown':
+            self._running = False
+        else:
+            self._log(f"后台进程：收到未知指令: {cmd_type}")
 
     def _publish_status(self):
         system_status = {'timestamp': time.time(), 'devices': {}}
@@ -120,20 +129,30 @@ class SystemController:
         self._log(f"后台进程：已安全关闭。")
 
     def _execute_protocol(self, protocol):
-        self._log(f"[{self.config['system_name']}] 开始执行自动化协议...")
+        self._log(f"开始执行自动化协议...")
         try:
             for step in protocol:
+                if not self._running: # 允许协议执行过程中紧急停止
+                    self._log("协议执行被中断。")
+                    break
+                
                 command_type = step.get('command')
                 if not command_type: continue
+
                 if command_type == 'delay':
-                    self._log(f" -> 协议步骤：延时 {step.get('duration', 0)} 秒")
-                    time.sleep(step.get('duration', 0))
+                    duration = step.get('duration', 0)
+                    self._log(f" -> 协议步骤：延时 {duration} 秒")
+                    time.sleep(duration)
                 else:
+                    # 对于协议中的其他指令，直接转发给命令处理器
                     params = {k: v for k, v in step.items() if k != 'command'}
                     command_to_process = {'type': command_type, 'params': params}
                     self._process_command(command_to_process)
-            self.status_queue.put({'info': '自动化协议执行完毕。'})
-            self._log(f"[{self.config['system_name']}] 自动化协议执行完毕。")
+                    time.sleep(0.1) # 协议步骤之间增加一个小的延时，确保指令被处理
+            
+            if self._running:
+                self.status_queue.put({'info': '自动化协议执行完毕。'})
+                self._log(f"自动化协议执行完毕。")
         except Exception as e:
             error_msg = f"协议执行出错: {e}"
             self.status_queue.put({'error': error_msg})

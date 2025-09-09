@@ -73,6 +73,20 @@ class KamoerPeristalticPump(BasePump):
     def stop(self):
         print(f"[{self.__class__.__name__}] 正在停止泵...")
         return self._set_pump_state(start=False)
+    
+    def set_parameters(self, speed=None, **kwargs):
+        """
+        在线设置泵的运行参数。
+        """
+        if not self.is_connected:
+            print("错误: 设备未连接。")
+            return False
+        
+        # 如果提供了 speed 参数，则设置速度
+        if speed is not None:
+            print(f"[{self.__class__.__name__}] 动态设置转速为: {speed} RPM...")
+            return self._set_speed(speed)
+        return False # 如果没有提供有效参数，返回失败
 
     def get_status(self):
         speed = self._read_real_time_speed()
@@ -146,7 +160,7 @@ class KamoerPeristalticPump(BasePump):
             
     def _read_holding_registers(self, address, count):
         try:
-            r = self.client.read_holding_registers(address, count, device_id=self.unit_address)
+            r = self.client.read_holding_registers(address, device_id=self.unit_address)
             return None if r.isError() else r.registers
         except ModbusException as e:
             print(f"[{self.__class__.__name__}] 错误: {e}")
