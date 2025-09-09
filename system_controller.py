@@ -39,30 +39,77 @@ class SystemController:
         if self.log_queue:
             self.log_queue.put(message)
 
+    # 只要一个设备连接失败，就关闭控制系统
+    
+    # def _setup_devices(self):
+    #     self._log(f"[{self.config['system_name']}] 正在设置设备...")
+    #     try:
+    #         if 'pumps' in self.config:
+    #             for pump_config in self.config['pumps']:
+    #                 self.pumps[pump_config['id']] = device_factory(pump_config)
+            
+    #         if 'power_supplies' in self.config:
+    #             for ps_config in self.config['power_supplies']:
+    #                 self.power_supplies[ps_config['id']] = device_factory(ps_config)
+
+    #         all_devices = list(self.pumps.values()) + list(self.power_supplies.values())
+    #         self._log(f"[{self.config['system_name']}] 正在连接所有设备...")
+    #         for device_obj in all_devices:
+    #             if not device_obj.connect():
+    #                 # connect 方法内部会打印失败信息
+    #                 raise ConnectionError(f"设备 {device_obj.__class__.__name__} on {device_obj.port} 连接失败。")
+            
+    #         self._log(f"[{self.config['system_name']}] 所有设备已连接并准备就绪。")
+    #         return True
+    #     except Exception as e:
+    #         self._log(f"[{self.config['system_name']}] 设备设置失败: {e}")
+    #         self._shutdown()
+    #         return False
+
+
+    # 当一个设备连接失败时，继续尝试连接其他设备。可用于调试。
+    
     def _setup_devices(self):
         self._log(f"[{self.config['system_name']}] 正在设置设备...")
-        try:
-            if 'pumps' in self.config:
-                for pump_config in self.config['pumps']:
+        errors = []
+        # 创建设备对象
+        if 'pumps' in self.config:
+            for pump_config in self.config['pumps']:
+                try:
                     self.pumps[pump_config['id']] = device_factory(pump_config)
-            
-            if 'power_supplies' in self.config:
-                for ps_config in self.config['power_supplies']:
+                except Exception as e:
+                    error_msg = f"泵 {pump_config.get('id', '')} 创建失败: {e}"
+                    self._log(error_msg)
+                    errors.append(error_msg)
+        if 'power_supplies' in self.config:
+            for ps_config in self.config['power_supplies']:
+                try:
                     self.power_supplies[ps_config['id']] = device_factory(ps_config)
+                except Exception as e:
+                    error_msg = f"电源 {ps_config.get('id', '')} 创建失败: {e}"
+                    self._log(error_msg)
+                    errors.append(error_msg)
 
-            all_devices = list(self.pumps.values()) + list(self.power_supplies.values())
-            self._log(f"[{self.config['system_name']}] 正在连接所有设备...")
-            for device_obj in all_devices:
+        # 连接设备
+        all_devices = list(self.pumps.values()) + list(self.power_supplies.values())
+        self._log(f"[{self.config['system_name']}] 正在连接所有设备...")
+        for device_obj in all_devices:
+            try:
                 if not device_obj.connect():
-                    # connect 方法内部会打印失败信息
-                    raise ConnectionError(f"设备 {device_obj.__class__.__name__} on {device_obj.port} 连接失败。")
-            
-            self._log(f"[{self.config['system_name']}] 所有设备已连接并准备就绪。")
-            return True
-        except Exception as e:
-            self._log(f"[{self.config['system_name']}] 设备设置失败: {e}")
-            self._shutdown()
+                    error_msg = f"设备 {device_obj.__class__.__name__} on {getattr(device_obj, 'port', '?')} 连接失败。"
+                    self._log(error_msg)
+                    errors.append(error_msg)
+            except Exception as e:
+                error_msg = f"设备 {device_obj.__class__.__name__} on {getattr(device_obj, 'port', '?')} 连接异常: {e}"
+                self._log(error_msg)
+                errors.append(error_msg)
+
+        if errors:
+            self._log(f"[{self.config['system_name']}] 部分设备连接失败:\n" + "\n".join(errors))
+            # 不调用 self._shutdown()，让已连接设备继续工作
             return False
+        self._log(f"[{self.config['system_name']}] 所有设备已连接并准备就绪。")
+        return True
 
     def run(self):
         if not self._setup_devices():
