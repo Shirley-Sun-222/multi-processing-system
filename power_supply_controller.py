@@ -107,19 +107,22 @@ class GPD4303SPowerSupply:
                 status[f'ch{i}_current'] = 0.0
             return status
 
-        # ★★★ 核心修正 3：循环获取状态时，使用正确的通道数 ★★★
-        for i in range(1, self.num_channels + 1):
+        # --- 核心修正：使用查询电压的方式来判断总输出状态 ---
+        ch1_voltage = self.get_voltage(1)
+        # 如果通道1的电压大于一个小的阈值，就认为总输出是打开的
+        status['output_on'] = ch1_voltage >= 0.001
+
+        # 继续获取所有通道的详细状态
+        status['ch1_voltage'] = ch1_voltage
+        status['ch1_current'] = self.get_current(1)
+        
+        for i in range(2, self.num_channels + 1):
             status[f'ch{i}_voltage'] = self.get_voltage(i)
             status[f'ch{i}_current'] = self.get_current(i)
-        
+
+        # 原始的 STATUS? 查询逻辑不再用于判断 on/off，但可以保留用于调试
         status_word_str = self._query("STATUS?")
-        if status_word_str:
-            try:
-                status_word = int(status_word_str)
-                # 根据GPD-X303S手册，bit 5 代表CH1/CH2的输出状态
-                status['output_on'] = (status_word & (1 << 5)) != 0
-            except (ValueError, IndexError):
-                status['output_on'] = False
-        else:
-            status['output_on'] = False
+        # print(f"[电源] STATUS? 返回 (仅供调试): {status_word_str}")
+        # print(f"[电源] 解析后 output_on: {status['output_on']}")
         return status
+    

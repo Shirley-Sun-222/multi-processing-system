@@ -621,6 +621,7 @@ class MainWindow(QMainWindow):
             while not self.main_power_status_queue.empty(): status_data = self.main_power_status_queue.get_nowait()
             if status_data and self.main_power_config['id'] in status_data['devices']:
                 power_status = status_data['devices'][self.main_power_config['id']]
+                print(f"[UI] 收到电源状态: {power_status}") # 调试输出
                 output_on = power_status.get('output_on', False)
                 status_text_parts = []
                 for i in range(1, 3): v = power_status.get(f'ch{i}_voltage', 0.0); c = power_status.get(f'ch{i}_current', 0.0); status_text_parts.append(f"CH{i}: {v:.2f}V/{c:.3f}A")

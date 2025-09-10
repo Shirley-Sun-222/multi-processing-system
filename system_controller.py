@@ -119,6 +119,7 @@ class SystemController:
         system_status = {'timestamp': time.time(), 'devices': {}}
         for dev_id, dev_obj in self.devices.items():
             system_status['devices'][dev_id] = dev_obj.get_status()
+        # print(f"[后台] 推送状态: {system_status}")  # 调试
         self.status_queue.put(system_status)
 
     def _shutdown(self):
