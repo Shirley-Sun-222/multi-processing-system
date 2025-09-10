@@ -4,3 +4,4 @@ pyvisa
 pyvisa-py
 pyqtgraph
 pandas
+openpyxl

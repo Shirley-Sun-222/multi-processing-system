@@ -1,4 +1,4 @@
-# file: system_controller.py (已修复参数传递BUG的最终版)
+# file: system_controller.py (已将定时单位改为秒)
 
 import time
 import threading
@@ -28,6 +28,7 @@ class SystemController:
         self.log_queue = log_queue
         self.devices = {}
         self._running = True
+        self.power_off_timer_thread = None
 
     def _log(self, message):
         print(message)
@@ -86,25 +87,37 @@ class SystemController:
             self.status_queue.put({'error': f"指令失败：未找到ID为 '{device_id}' 的设备。"})
             return
         
-        # ★★★ 核心修正：在传递前，从params字典中移除pump_id和device_id ★★★
-        # 创建一个只包含方法所需参数的新字典
-        filtered_params = {k: v for k, v in params.items() if k not in ['pump_id', 'device_id']}
+        # ★★★ 修改点 1: 过滤参数时，键名从 'auto_off_minutes' 改为 'auto_off_seconds' ★★★
+        filtered_params = {k: v for k, v in params.items() if k not in ['pump_id', 'device_id', 'auto_off_seconds']}
         
         if cmd_type == 'start_pump':
             target_device.start(**filtered_params)
         elif cmd_type == 'stop_pump':
             target_device.stop()
         elif cmd_type == 'set_pump_params':
-            # set_pump_params 和 start_pump 在签名上可能不同，所以我们为它也使用 filtered_params
             target_device.set_parameters(**filtered_params)
         elif cmd_type == 'set_power_voltage':
             target_device.set_voltage(params['channel'], params['voltage'])
         elif cmd_type == 'set_power_current':
             target_device.set_current(params['channel'], params['current'])
         elif cmd_type == 'set_power_output':
+            if self.power_off_timer_thread and self.power_off_timer_thread.is_alive():
+                 self._log("后台进程: 检测到新的电源操作，正在停止旧的定时关闭任务。")
+            
             target_device.set_output(params['enable'])
+            
+            # ★★★ 修改点 2: 检查的键名改为 'auto_off_seconds' ★★★
+            if params['enable'] and 'auto_off_seconds' in params:
+                duration_seconds = params['auto_off_seconds']
+                if duration_seconds > 0:
+                    self.power_off_timer_thread = threading.Thread(
+                        target=self._power_off_timer, 
+                        args=(duration_seconds, device_id)
+                    )
+                    self.power_off_timer_thread.daemon = True
+                    self.power_off_timer_thread.start()
+
         elif cmd_type == 'run_protocol':
-            # 注意: _execute_protocol 内部会再次调用 _process_command, 逻辑保持一致
             threading.Thread(target=self._execute_protocol, args=(params.get('protocol', []),)).start()
         elif cmd_type == 'stop_all':
             for dev in self.devices.values():
@@ -115,15 +128,33 @@ class SystemController:
         else:
             self._log(f"后台进程：收到未知指令: {cmd_type}")
 
+    # ★★★ 修改点 3: 修改定时器函数的参数和日志信息 ★★★
+    def _power_off_timer(self, duration_seconds, device_id):
+        """在一个独立的线程中等待指定时间，然后发送关闭电源的命令。"""
+        self._log(f"后台进程：电源定时关闭任务已启动，将在 {duration_seconds} 秒后关闭 {device_id}。")
+        
+        # 直接使用传入的秒数，不再需要乘以60
+        time.sleep(duration_seconds)
+        
+        if self._running:
+            self._log(f"后台进程：{duration_seconds} 秒时间到，正在发送关闭 {device_id} 的指令。")
+            self.command_queue.put({
+                'type': 'set_power_output',
+                'params': {'device_id': device_id, 'enable': False}
+            })
+        else:
+            self._log(f"后台进程：定时任务时间到，但主程序已关闭，取消自动关机。")
+
     def _publish_status(self):
         system_status = {'timestamp': time.time(), 'devices': {}}
         for dev_id, dev_obj in self.devices.items():
             system_status['devices'][dev_id] = dev_obj.get_status()
-        # print(f"[后台] 推送状态: {system_status}")  # 调试
+        print(f"[后台] 推送状态: {system_status}")
         self.status_queue.put(system_status)
 
     def _shutdown(self):
         self._log(f"后台进程：正在安全关闭所有设备...")
+        self._running = False
         for device in self.devices.values():
             if hasattr(device, 'is_connected') and device.is_connected:
                 device.disconnect()
@@ -133,7 +164,7 @@ class SystemController:
         self._log(f"开始执行自动化协议...")
         try:
             for step in protocol:
-                if not self._running: # 允许协议执行过程中紧急停止
+                if not self._running:
                     self._log("协议执行被中断。")
                     break
                 
@@ -145,11 +176,10 @@ class SystemController:
                     self._log(f" -> 协议步骤：延时 {duration} 秒")
                     time.sleep(duration)
                 else:
-                    # 对于协议中的其他指令，直接转发给命令处理器
                     params = {k: v for k, v in step.items() if k != 'command'}
                     command_to_process = {'type': command_type, 'params': params}
                     self._process_command(command_to_process)
-                    time.sleep(0.1) # 协议步骤之间增加一个小的延时，确保指令被处理
+                    time.sleep(0.1)
             
             if self._running:
                 self.status_queue.put({'info': '自动化协议执行完毕。'})
