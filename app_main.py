@@ -1,4 +1,4 @@
-# file: app_main.py (已修复BUG的最终版)
+# file: app_main.py (已添加方向控制功能的最终版)
 
 import sys
 import multiprocessing
@@ -30,7 +30,6 @@ except ImportError:
 
 
 # --- 资源管理器 ---
-# (ResourceManager 类保持不变)
 class ResourceManager:
     """管理全局设备池的状态（空闲/占用）。"""
     def __init__(self, device_pool):
@@ -57,7 +56,6 @@ class ResourceManager:
 
 
 # --- 对话框 ---
-# (DeviceSelectionDialog, PumpActionDialog, DelayDialog 类保持不变)
 class DeviceSelectionDialog(QDialog):
     """从资源池中选择一个或多个设备的通用对话框。"""
     def __init__(self, resource_manager, mode='system', parent=None):
@@ -136,15 +134,13 @@ class DelayDialog(QDialog):
 
 # --- 控制面板 ---
 class ControlPanel(QMainWindow):
-    # ★★★ 修改点 1：为构造函数增加入参 `system_name` ★★★
     def __init__(self, title, device_configs, resource_manager, system_name):
         super().__init__()
         self.setWindowTitle(title)
         self.device_configs = device_configs
         self.resource_manager = resource_manager
-        self.system_name = system_name # 保存用于在字典中查找自己的、正确的键
+        self.system_name = system_name
 
-        # ... (后续代码保持不变)
         self.device_widgets = {}
         self.curves = {}
         self.command_queue, self.status_queue, self.log_queue, self.process = None, None, None, None
@@ -156,22 +152,20 @@ class ControlPanel(QMainWindow):
             if 'pump' in dev_id:
                 self.data[f"{dev_id}_speed"] = []
                 self.data[f"{dev_id}_flow"] = []
-            elif 'power' in dev_id:
-                self.data[f"{dev_id}_ch1_voltage"] = []
-                self.data[f"{dev_id}_ch1_current"] = []
+                # 只为前2个通道创建数据存储
+                for i in range(1, 3):
+                    self.data[f"{dev_id}_ch{i}_voltage"] = []
+                    self.data[f"{dev_id}_ch{i}_current"] = []
 
         self._init_ui()
         self._start_backend()
 
-    # ... (从 _init_ui 到 on_stop_all 的所有方法都保持不变)
     def _init_ui(self):
-        # 创建所有UI区域
         manual_group = self._create_manual_group()
         protocol_group = self._create_protocol_group()
         plot_group = self._create_plot_group()
         log_group = self._create_log_group()
 
-        # 使用可拖拽的分隔栏进行主布局
         top_splitter = QSplitter(Qt.Orientation.Horizontal)
         top_splitter.addWidget(manual_group)
         top_splitter.addWidget(protocol_group)
@@ -187,8 +181,6 @@ class ControlPanel(QMainWindow):
         layout = QVBoxLayout(central_widget)
         layout.addWidget(main_splitter)
         self.setCentralWidget(central_widget)
-
-        # 连接所有信号与槽
         self._connect_signals()
 
     def _create_manual_group(self):
@@ -197,24 +189,34 @@ class ControlPanel(QMainWindow):
         row = 0
         for config in self.device_configs:
             dev_id = config['id']
+            # ★★★ 修改点 1：为泵增加方向控制的下拉框 ★★★
             if 'pump' in dev_id:
                 is_peristaltic = 'kamoer' in dev_id or 'lange' in dev_id
+                
+                # 创建方向选择下拉框
+                direction_box = QComboBox()
+                direction_box.addItems(["正转", "反转"])
+
                 self.device_widgets[dev_id] = {
                     'input': QLineEdit("100.0" if is_peristaltic else "5.0"),
                     'set_btn': QPushButton("设置"),
                     'start_btn': QPushButton("启动"),
                     'stop_btn': QPushButton("停止"),
-                    'status': QLabel("状态: 未知")
+                    'status': QLabel("状态: 未知"),
+                    'direction_box': direction_box  # 将下拉框存入字典
                 }
                 grid.addWidget(QLabel(f"泵: {config['description']}:"), row, 0)
-                grid.addWidget(QLabel("转速/流量:"), row, 1)
-                grid.addWidget(self.device_widgets[dev_id]['input'], row, 2)
-                grid.addWidget(self.device_widgets[dev_id]['set_btn'], row, 3)
-                grid.addWidget(self.device_widgets[dev_id]['start_btn'], row, 4)
-                grid.addWidget(self.device_widgets[dev_id]['stop_btn'], row, 5)
-                grid.addWidget(self.device_widgets[dev_id]['status'], row, 6, 1, 2)
+                # 为新控件增加布局
+                grid.addWidget(self.device_widgets[dev_id]['direction_box'], row, 1)
+                grid.addWidget(QLabel("转速/流量:"), row, 2)
+                grid.addWidget(self.device_widgets[dev_id]['input'], row, 3)
+                grid.addWidget(self.device_widgets[dev_id]['set_btn'], row, 4)
+                grid.addWidget(self.device_widgets[dev_id]['start_btn'], row, 5)
+                grid.addWidget(self.device_widgets[dev_id]['stop_btn'], row, 6)
+                grid.addWidget(self.device_widgets[dev_id]['status'], row, 7, 1, 2)
                 row += 1
             elif 'power' in dev_id:
+                # 电源部分保持不变
                 self.device_widgets[dev_id] = {
                     'ch_select': QComboBox(),
                     'volt_input': QLineEdit("5.0"),
@@ -223,9 +225,8 @@ class ControlPanel(QMainWindow):
                     'output_btn': QPushButton("打开总输出"),
                     'status': QLabel("状态: 未知")
                 }
-                self.device_widgets[dev_id]['ch_select'].addItems(["1", "2", "3", "4"])
+                self.device_widgets[dev_id]['ch_select'].addItems(["1", "2"])
                 self.device_widgets[dev_id]['output_btn'].setCheckable(True)
-
                 grid.addWidget(QLabel(f"电源: {config['description']}:"), row, 0)
                 grid.addWidget(self.device_widgets[dev_id]['ch_select'], row, 1)
                 grid.addWidget(QLabel("V:"), row, 2)
@@ -234,28 +235,54 @@ class ControlPanel(QMainWindow):
                 grid.addWidget(self.device_widgets[dev_id]['curr_input'], row, 5)
                 grid.addWidget(self.device_widgets[dev_id]['set_ch_btn'], row, 6)
                 grid.addWidget(self.device_widgets[dev_id]['output_btn'], row, 7)
-                
                 status_row = row + 1
                 grid.addWidget(self.device_widgets[dev_id]['status'], status_row, 0, 1, 8)
                 row += 2
         
-        grid.setColumnStretch(8, 1)
+        grid.setColumnStretch(9, 1)
         group.setLayout(grid)
         return group
         
     def _create_protocol_group(self):
         group = QGroupBox("自动化协议编辑器")
         layout = QHBoxLayout()
-        # 工具箱
-        toolbox = QVBoxLayout(); toolbox.addWidget(QLabel("1. 添加步骤:")); self.add_start_pump_btn = QPushButton("启动/设置泵"); self.add_stop_pump_btn = QPushButton("停止泵"); self.add_delay_btn = QPushButton("延时"); toolbox.addWidget(self.add_start_pump_btn); toolbox.addWidget(self.add_stop_pump_btn); toolbox.addWidget(self.add_delay_btn); toolbox.addStretch()
-        # 流程列表
-        sequence = QVBoxLayout(); sequence.addWidget(QLabel("2. 编辑流程:")); self.protocol_list_widget = QListWidget()
-        edit_buttons = QHBoxLayout(); self.remove_step_btn = QPushButton("删除"); self.move_up_btn = QPushButton("上移"); self.move_down_btn = QPushButton("下移"); edit_buttons.addWidget(self.remove_step_btn); edit_buttons.addStretch(); edit_buttons.addWidget(self.move_up_btn); edit_buttons.addWidget(self.move_down_btn)
-        sequence.addWidget(self.protocol_list_widget); sequence.addLayout(edit_buttons)
-        # 执行与保存
-        actions = QVBoxLayout(); actions.addWidget(QLabel("3. 执行与保存:")); self.run_protocol_button = QPushButton("执行协议"); self.load_protocol_button = QPushButton("从文件加载..."); self.save_protocol_button = QPushButton("保存到文件..."); self.save_data_button = QPushButton("保存数据(CSV)"); self.save_chart_button = QPushButton("保存图表(PNG)"); self.stop_all_button = QPushButton("!! 全部紧急停止 !!"); self.stop_all_button.setStyleSheet("background-color: #d9534f; color: white;")
-        actions.addWidget(self.run_protocol_button); actions.addWidget(self.load_protocol_button); actions.addWidget(self.save_protocol_button); actions.addStretch(); actions.addWidget(self.save_data_button); actions.addWidget(self.save_chart_button); actions.addStretch(); actions.addWidget(self.stop_all_button)
-        layout.addLayout(toolbox, 1); layout.addLayout(sequence, 3); layout.addLayout(actions, 1)
+        toolbox = QVBoxLayout(); toolbox.addWidget(QLabel("1. 添加步骤:"))
+        self.add_start_pump_btn = QPushButton("启动/设置泵")
+        self.add_stop_pump_btn = QPushButton("停止泵")
+        self.add_delay_btn = QPushButton("延时")
+        toolbox.addWidget(self.add_start_pump_btn); toolbox.addWidget(self.add_stop_pump_btn)
+        toolbox.addWidget(self.add_delay_btn); toolbox.addStretch()
+        sequence = QVBoxLayout(); 
+        sequence.addWidget(QLabel("2. 编辑流程:")); self.protocol_list_widget = QListWidget()
+        edit_buttons = QHBoxLayout(); 
+        self.remove_step_btn = QPushButton("删除"); 
+        self.move_up_btn = QPushButton("上移"); 
+        self.move_down_btn = QPushButton("下移"); 
+        edit_buttons.addWidget(self.remove_step_btn); 
+        edit_buttons.addStretch(); edit_buttons.addWidget(self.move_up_btn); 
+        edit_buttons.addWidget(self.move_down_btn)
+        sequence.addWidget(self.protocol_list_widget); 
+        sequence.addLayout(edit_buttons)
+        actions = QVBoxLayout(); 
+        actions.addWidget(QLabel("3. 执行与保存:"))
+        self.run_protocol_button = QPushButton("执行协议"); 
+        self.load_protocol_button = QPushButton("从文件加载..."); 
+        self.save_protocol_button = QPushButton("保存到文件..."); 
+        self.save_data_button = QPushButton("保存数据(CSV)"); 
+        self.save_chart_button = QPushButton("保存图表(PNG)"); 
+        self.stop_all_button = QPushButton("!! 全部紧急停止 !!"); 
+        self.stop_all_button.setStyleSheet("background-color: #d9534f; color: white;")
+        actions.addWidget(self.run_protocol_button); 
+        actions.addWidget(self.load_protocol_button); 
+        actions.addWidget(self.save_protocol_button); 
+        actions.addStretch(); 
+        actions.addWidget(self.save_data_button); 
+        actions.addWidget(self.save_chart_button); 
+        actions.addStretch(); 
+        actions.addWidget(self.stop_all_button)
+        layout.addLayout(toolbox, 1); 
+        layout.addLayout(sequence, 3); 
+        layout.addLayout(actions, 1)
         group.setLayout(layout)
         return group
     
@@ -265,42 +292,24 @@ class ControlPanel(QMainWindow):
         self.plot_widget.setBackground('w')
         self.plot_widget.showGrid(x=True, y=True)
         self.plot_widget.addLegend()
-
         p1 = self.plot_widget.getPlotItem()
         p1.setLabel('bottom', '时间 (s)')
-
         self.p2_viewbox = pg.ViewBox()
         p1.showAxis('right')
         p1.scene().addItem(self.p2_viewbox)
         p1.getAxis('right').linkToView(self.p2_viewbox)
         self.p2_viewbox.setXLink(p1)
-
         p1.getAxis('left').setLabel('速度 (RPM) / 电压 (V)', color='#0000FF')
         p1.getAxis('right').setLabel('流量 (ml/min)', color='#FF0000')
-
-        pens = {
-            'kamoer': pg.mkPen('b', width=2, style=Qt.PenStyle.SolidLine),
-            'oushisheng': pg.mkPen('r', width=2, style=Qt.PenStyle.SolidLine),
-            'power': pg.mkPen('g', width=2, style=Qt.PenStyle.DashLine)
-        }
-
+        pens = {'kamoer': pg.mkPen('b', width=2, style=Qt.PenStyle.SolidLine), 'oushisheng': pg.mkPen('r', width=2, style=Qt.PenStyle.SolidLine), 'power': pg.mkPen('g', width=2, style=Qt.PenStyle.DashLine)}
         for config in self.device_configs:
             dev_id = config['id']
-            if 'kamoer' in dev_id or 'lange' in dev_id:
-                self.curves[dev_id] = p1.plot(pen=pens['kamoer'], name=f"{config['description']}-速度")
-            elif 'plunger' in dev_id:
-                curve = pg.PlotDataItem(pen=pens['oushisheng'], name=f"{config['description']}-流量")
-                self.p2_viewbox.addItem(curve)
-                self.curves[dev_id] = curve
-            elif 'power' in dev_id:
-                self.curves[dev_id] = p1.plot(pen=pens['power'], name=f"{config['description']}-电压")
-
-        def update_views():
-            self.p2_viewbox.setGeometry(p1.getViewBox().sceneBoundingRect())
-            self.p2_viewbox.linkedViewChanged(p1.getViewBox(), self.p2_viewbox.XAxis)
+            if 'kamoer' in dev_id or 'lange' in dev_id: self.curves[dev_id] = p1.plot(pen=pens['kamoer'], name=f"{config['description']}-速度")
+            elif 'plunger' in dev_id: curve = pg.PlotDataItem(pen=pens['oushisheng'], name=f"{config['description']}-流量"); self.p2_viewbox.addItem(curve); self.curves[dev_id] = curve
+            elif 'power' in dev_id: self.curves[dev_id] = p1.plot(pen=pens['power'], name=f"{config['description']}-电压")
+        def update_views(): self.p2_viewbox.setGeometry(p1.getViewBox().sceneBoundingRect()); self.p2_viewbox.linkedViewChanged(p1.getViewBox(), self.p2_viewbox.XAxis)
         update_views()
         p1.getViewBox().sigResized.connect(update_views)
-
         layout = QVBoxLayout(); layout.addWidget(self.plot_widget); group.setLayout(layout)
         return group
     
@@ -315,9 +324,12 @@ class ControlPanel(QMainWindow):
                 widgets_dict['start_btn'].clicked.connect(lambda _, p=dev_id: self.on_start_pump(p))
                 widgets_dict['stop_btn'].clicked.connect(lambda _, p=dev_id: self.on_stop_pump(p))
                 widgets_dict['set_btn'].clicked.connect(lambda _, p=dev_id: self.on_set_pump_params(p))
+                # ★★★ 修改点 2：连接下拉框的信号到新的处理函数 ★★★
+                widgets_dict['direction_box'].currentTextChanged.connect(lambda _, p=dev_id: self.on_set_direction(p))
             elif 'power' in dev_id:
                 widgets_dict['set_ch_btn'].clicked.connect(lambda _, p=dev_id: self.on_set_power_channel(p))
                 widgets_dict['output_btn'].clicked.connect(lambda _, p=dev_id: self.on_toggle_power_output(p))
+        
         self.add_start_pump_btn.clicked.connect(self.on_add_start_set_pump); self.add_stop_pump_btn.clicked.connect(self.on_add_stop_pump); self.add_delay_btn.clicked.connect(self.on_add_delay); self.remove_step_btn.clicked.connect(self.on_remove_step); self.move_up_btn.clicked.connect(self.on_move_up); self.move_down_btn.clicked.connect(self.on_move_down); self.run_protocol_button.clicked.connect(self.on_run_protocol); self.save_protocol_button.clicked.connect(self.on_save_protocol_to_file); self.load_protocol_button.clicked.connect(self.on_load_protocol_from_file); self.stop_all_button.clicked.connect(self.on_stop_all); self.save_data_button.clicked.connect(self.on_save_data); self.save_chart_button.clicked.connect(self.on_save_chart)
 
     def _start_backend(self):
@@ -363,37 +375,73 @@ class ControlPanel(QMainWindow):
                         output_on = dev_status.get('output_on', False)
                         ch1_v = dev_status.get('ch1_voltage', 0.0)
                         ch1_c = dev_status.get('ch1_current', 0.0)
-                        
                         status_text = f"CH1 V: {ch1_v:.2f}, A: {ch1_c:.3f} | 输出: {'已打开' if output_on else '已关闭'}"
                         self.device_widgets[dev_id]['status'].setText(status_text)
-                        
                         self.device_widgets[dev_id]['output_btn'].setChecked(output_on)
                         self.device_widgets[dev_id]['output_btn'].setText("关闭总输出" if output_on else "打开总输出")
-
                         self.data[f"{dev_id}_ch1_voltage"].append(ch1_v)
                         self.data[f"{dev_id}_ch1_current"].append(ch1_c)
-
-                        if dev_id in self.curves:
-                            self.curves[dev_id].setData(self.data['time'], self.data[f"{dev_id}_ch1_voltage"])
-
+                        if dev_id in self.curves: self.curves[dev_id].setData(self.data['time'], self.data[f"{dev_id}_ch1_voltage"])
         except Empty: pass
         except Exception as e: print(f"[{self.windowTitle()}] 更新UI时出错: {e}")
+
+    # --- ★★★ 修改点 3：添加新的事件处理函数并修改旧的 ★★★ ---
+    def on_start_pump(self, pump_id):
+        """处理“启动”按钮点击事件"""
+        try:
+            widget_set = self.device_widgets[pump_id]
+            # 从下拉框读取方向
+            direction_text = widget_set['direction_box'].currentText()
+            direction_param = 'reverse' if direction_text == '反转' else 'forward'
+            
+            params = {'pump_id': pump_id, 'direction': direction_param}
+            
+            # 根据泵类型读取速度或流量
+            if 'kamoer' in pump_id or 'lange' in pump_id:
+                params['speed'] = float(widget_set['input'].text())
+            elif 'plunger' in pump_id:
+                params['flow_rate'] = float(widget_set['input'].text())
+                
+            self.command_queue.put({'type': 'start_pump', 'params': params})
+        except ValueError:
+            QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
+
+    def on_set_direction(self, pump_id):
+        """处理方向下拉框变化事件，用于实时切换方向"""
+        widget_set = self.device_widgets[pump_id]
+        direction_text = widget_set['direction_box'].currentText()
+        direction_param = 'reverse' if direction_text == '反转' else 'forward'
+        
+        # 使用 set_pump_params 指令来动态改变方向
+        params = {'pump_id': pump_id, 'direction': direction_param}
+        self.command_queue.put({'type': 'set_pump_params', 'params': params})
+
+    def on_set_pump_params(self, pump_id):
+        # 这个函数现在只负责设置速度/流量，方向由独立的下拉框控制
+        try:
+            widget_set = self.device_widgets[pump_id]
+            params = {'pump_id': pump_id}
+            if 'kamoer' in pump_id or 'lange' in pump_id:
+                params['speed'] = float(widget_set['input'].text())
+            elif 'plunger' in pump_id:
+                params['flow_rate'] = float(widget_set['input'].text())
+            self.command_queue.put({'type': 'set_pump_params', 'params': params})
+        except ValueError:
+            QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
+
+    def on_stop_pump(self, pump_id):
+        self.command_queue.put({'type': 'stop_pump', 'params': {'pump_id': pump_id}})
 
     def on_set_power_channel(self, device_id):
         try:
             widgets = self.device_widgets[device_id]
-            channel = int(widgets['ch_select'].currentText())
-            voltage = float(widgets['volt_input'].text())
-            current = float(widgets['curr_input'].text())
-
+            channel = int(widgets['ch_select'].currentText()); voltage = float(widgets['volt_input'].text()); current = float(widgets['curr_input'].text())
             self.command_queue.put({'type': 'set_power_voltage', 'params': {'device_id': device_id, 'channel': channel, 'voltage': voltage}})
             self.command_queue.put({'type': 'set_power_current', 'params': {'device_id': device_id, 'channel': channel, 'current': current}})
-        except ValueError:
-            QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
+        except ValueError: QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
 
     def on_toggle_power_output(self, device_id):
-        widgets = self.device_widgets[device_id]
-        enable = widgets['output_btn'].isChecked()
+        widgets = self.device_widgets[device_id]; enable = widgets['output_btn'].isChecked()
         self.command_queue.put({'type': 'set_power_output', 'params': {'device_id': device_id, 'enable': enable}})
         
     def on_save_data(self):
@@ -472,32 +520,20 @@ class ControlPanel(QMainWindow):
         pump_id = command.get('pump_id'); device_id = command.get('device_id'); target_id = pump_id or device_id
         target_desc = app.main_window.device_descriptions.get(target_id, target_id)
         if cmd_type in ['start_pump', 'set_pump_params']:
-            action = "启动" if cmd_type == 'start_pump' else "设置"; params = command.get('params', {}); param_str = ", ".join([f"{k}: {v}" for k, v in params.items()]); desc = f"{action}泵: {target_desc}, 参数: {param_str}"
+            action = "启动" if cmd_type == 'start_pump' else "设置"; params = command.get('params', {});
+            param_str = ", ".join([f"{k}: {v}" for k, v in params.items()]); 
+            desc = f"{action}泵: {target_desc}, 参数: {param_str}"
         elif cmd_type == 'stop_pump': desc = f"停止泵: {target_desc}"
         elif cmd_type == 'delay': desc = f"延时: {command.get('duration', 0)} 秒"
         elif cmd_type == 'stop_all': desc = "全部紧急停止"
         return desc
-    def on_start_pump(self, pump_id):
-        try:
-            params = {'pump_id': pump_id}; widget_set = self.device_widgets[pump_id]
-            if 'kamoer' in pump_id or 'lange' in pump_id: params['speed'] = float(widget_set['input'].text())
-            elif 'plunger' in pump_id: params['flow_rate'] = float(widget_set['input'].text())
-            self.command_queue.put({'type': 'start_pump', 'params': params})
-        except ValueError: QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
-    def on_stop_pump(self, pump_id): self.command_queue.put({'type': 'stop_pump', 'params': {'pump_id': pump_id}})
-    def on_set_pump_params(self, pump_id):
-        try:
-            params = {'pump_id': pump_id}; widget_set = self.device_widgets[pump_id]
-            if 'kamoer' in pump_id or 'lange' in pump_id: params['speed'] = float(widget_set['input'].text())
-            elif 'plunger' in pump_id: params['flow_rate'] = float(widget_set['input'].text())
-            self.command_queue.put({'type': 'set_pump_params', 'params': params})
-        except ValueError: QMessageBox.warning(self, "输入错误", "请输入有效的数字！")
-    def on_stop_all(self): self.command_queue.put({'type': 'stop_all'})
+    
+    def on_stop_all(self):
+        self.command_queue.put({'type': 'stop_all'})
 
     def closeEvent(self, event):
         device_ids = [c['id'] for c in self.device_configs]
         self.resource_manager.release_devices(device_ids)
-        # ★★★ 修改点 2：使用 self.system_name 来注销窗口 ★★★
         if self.system_name in app.main_window.control_systems:
             del app.main_window.control_systems[self.system_name]
         self.timer.stop()
@@ -517,23 +553,18 @@ class MainWindow(QMainWindow):
         self.resource_manager = resource_manager
         self.control_systems = {}
         self.device_descriptions = {dev['id']: dev['description'] for dev_list in DEVICE_POOL.values() if isinstance(dev_list, list) for dev in dev_list if isinstance(dev, dict) and 'id' in dev}
-        
         self.main_power_config = None
         self.main_power_process = None
         self.main_power_widgets = {}
-        
         if DEVICE_POOL.get('power_supplies'):
             self.main_power_config = DEVICE_POOL['power_supplies'][0]
             self.resource_manager.lock_devices([self.main_power_config['id']])
             self._start_main_power_backend()
-        
         main_widget = QWidget()
         main_layout = QVBoxLayout(main_widget)
         self.setCentralWidget(main_widget)
-        
         power_group = self._create_power_group()
         main_layout.addWidget(power_group)
-        
         launcher_group = QGroupBox("系统与调试")
         launcher_layout = QHBoxLayout()
         self.start_sys_a_btn = QPushButton("启动控制系统 A")
@@ -544,7 +575,6 @@ class MainWindow(QMainWindow):
         launcher_layout.addWidget(self.debug_device_btn)
         launcher_group.setLayout(launcher_layout)
         main_layout.addWidget(launcher_group)
-        
         self.start_sys_a_btn.clicked.connect(lambda: self.launch_system('System A'))
         self.start_sys_b_btn.clicked.connect(lambda: self.launch_system('System B'))
         self.debug_device_btn.clicked.connect(self.launch_debugger)
@@ -554,11 +584,9 @@ class MainWindow(QMainWindow):
         self.main_power_command_queue = multiprocessing.Queue()
         self.main_power_status_queue = multiprocessing.Queue()
         self.main_power_log_queue = multiprocessing.Queue()
-        
         controller = SystemController([self.main_power_config], self.main_power_command_queue, self.main_power_status_queue, self.main_power_log_queue)
         self.main_power_process = multiprocessing.Process(target=controller.run)
         self.main_power_process.start()
-        
         self.main_power_timer = QTimer(self)
         self.main_power_timer.setInterval(1000)
         self.main_power_timer.timeout.connect(self.update_main_power_ui)
@@ -567,83 +595,53 @@ class MainWindow(QMainWindow):
     def _create_power_group(self):
         group = QGroupBox("总电源控制")
         layout = QGridLayout()
-        
         if not self.main_power_config:
             layout.addWidget(QLabel("未在 system_config.py 中配置电源设备。"))
             group.setLayout(layout)
             group.setEnabled(False)
             return group
-
-        self.main_power_widgets = {
-            'ch_select': QComboBox(),
-            'volt_input': QLineEdit("5.0"),
-            'curr_input': QLineEdit("1.0"),
-            'set_ch_btn': QPushButton("设置参数"),
-            'output_btn': QPushButton("打开总电源"),
-            'status_label': QLabel("状态: 未知")
-        }
-        self.main_power_widgets['ch_select'].addItems(["1", "2", "3", "4"])
+        self.main_power_widgets = {'ch_select': QComboBox(), 'volt_input': QLineEdit("5.0"), 'curr_input': QLineEdit("1.0"), 'set_ch_btn': QPushButton("设置参数"), 'output_btn': QPushButton("打开总电源"), 'status_label': QLabel("状态: 未知")}
+        self.main_power_widgets['ch_select'].addItems(["1", "2"])
         self.main_power_widgets['output_btn'].setCheckable(True)
-
-        layout.addWidget(QLabel("通道:"), 0, 0)
-        layout.addWidget(self.main_power_widgets['ch_select'], 0, 1)
-        layout.addWidget(QLabel("电压 (V):"), 0, 2)
-        layout.addWidget(self.main_power_widgets['volt_input'], 0, 3)
-        layout.addWidget(QLabel("电流 (A):"), 0, 4)
-        layout.addWidget(self.main_power_widgets['curr_input'], 0, 5)
-        layout.addWidget(self.main_power_widgets['set_ch_btn'], 0, 6)
-        layout.addWidget(self.main_power_widgets['output_btn'], 0, 7)
-        layout.addWidget(self.main_power_widgets['status_label'], 1, 0, 1, 8)
+        layout.addWidget(QLabel("通道:"), 0, 0); layout.addWidget(self.main_power_widgets['ch_select'], 0, 1); 
+        layout.addWidget(QLabel("电压 (V):"), 0, 2); layout.addWidget(self.main_power_widgets['volt_input'], 0, 3); 
+        layout.addWidget(QLabel("电流 (A):"), 0, 4); layout.addWidget(self.main_power_widgets['curr_input'], 0, 5); 
+        layout.addWidget(self.main_power_widgets['set_ch_btn'], 0, 6); 
+        layout.addWidget(self.main_power_widgets['output_btn'], 0, 7); 
+        layout.addWidget(self.main_power_widgets['status_label'], 1, 0, 1, 8); 
         layout.setColumnStretch(8, 1)
-        
         self.main_power_widgets['set_ch_btn'].clicked.connect(self.on_set_main_power_params)
         self.main_power_widgets['output_btn'].clicked.connect(self.on_toggle_main_power)
-        
         group.setLayout(layout)
         return group
 
     def update_main_power_ui(self):
         try:
             status_data = None
-            while not self.main_power_status_queue.empty():
-                status_data = self.main_power_status_queue.get_nowait()
-            
+            while not self.main_power_status_queue.empty(): status_data = self.main_power_status_queue.get_nowait()
             if status_data and self.main_power_config['id'] in status_data['devices']:
                 power_status = status_data['devices'][self.main_power_config['id']]
                 output_on = power_status.get('output_on', False)
-                
                 status_text_parts = []
-                for i in range(1, 5):
-                    v = power_status.get(f'ch{i}_voltage', 0.0)
-                    c = power_status.get(f'ch{i}_current', 0.0)
-                    status_text_parts.append(f"CH{i}: {v:.2f}V/{c:.3f}A")
-
+                for i in range(1, 3): v = power_status.get(f'ch{i}_voltage', 0.0); c = power_status.get(f'ch{i}_current', 0.0); status_text_parts.append(f"CH{i}: {v:.2f}V/{c:.3f}A")
                 status_text = " | ".join(status_text_parts) + f" | 总输出: {'打开' if output_on else '关闭'}"
                 self.main_power_widgets['status_label'].setText(status_text)
-                
                 self.main_power_widgets['output_btn'].setChecked(output_on)
                 self.main_power_widgets['output_btn'].setText("关闭总电源" if output_on else "打开总电源")
-                if output_on:
-                    self.main_power_widgets['output_btn'].setStyleSheet("background-color: #5cb85c;")
-                else:
-                    self.main_power_widgets['output_btn'].setStyleSheet("")
-
-        except Empty:
-            pass
-        except Exception as e:
-            print(f"[主窗口] 更新总电源UI失败: {e}")
+                if output_on: self.main_power_widgets['output_btn'].setStyleSheet("background-color: #5cb85c;")
+                else: self.main_power_widgets['output_btn'].setStyleSheet("")
+        except Empty: pass
+        except Exception as e: print(f"[主窗口] 更新总电源UI失败: {e}")
 
     def on_set_main_power_params(self):
         try:
-            dev_id = self.main_power_config['id']
-            channel = int(self.main_power_widgets['ch_select'].currentText())
-            voltage = float(self.main_power_widgets['volt_input'].text())
+            dev_id = self.main_power_config['id']; 
+            channel = int(self.main_power_widgets['ch_select'].currentText()); 
+            voltage = float(self.main_power_widgets['volt_input'].text()); 
             current = float(self.main_power_widgets['curr_input'].text())
-            
             self.main_power_command_queue.put({'type': 'set_power_voltage', 'params': {'device_id': dev_id, 'channel': channel, 'voltage': voltage}})
             self.main_power_command_queue.put({'type': 'set_power_current', 'params': {'device_id': dev_id, 'channel': channel, 'current': current}})
-        except (ValueError, KeyError) as e:
-            QMessageBox.warning(self, "输入错误", f"请输入有效的数字！错误: {e}")
+        except (ValueError, KeyError) as e: QMessageBox.warning(self, "输入错误", f"请输入有效的数字！错误: {e}")
 
     def on_toggle_main_power(self, checked):
         if self.main_power_config:
@@ -655,46 +653,31 @@ class MainWindow(QMainWindow):
             print("正在关闭总电源控制器...")
             self.main_power_command_queue.put({'type': 'shutdown'})
             self.main_power_process.join(timeout=2)
-            if self.main_power_process.is_alive():
-                self.main_power_process.terminate()
+            if self.main_power_process.is_alive(): self.main_power_process.terminate()
         super().closeEvent(event)
         
     def launch_system(self, system_name):
-        if system_name in self.control_systems:
-            self.control_systems[system_name].activateWindow()
-            return
+        if system_name in self.control_systems: self.control_systems[system_name].activateWindow(); return
         dialog = DeviceSelectionDialog(self.resource_manager, mode='system', parent=self)
         if dialog.exec():
             selected_configs = dialog.get_selected_configs()
-            if not selected_configs:
-                QMessageBox.warning(self, "未选择", "您没有选择任何设备。")
-                return
+            if not selected_configs: QMessageBox.warning(self, "未选择", "您没有选择任何设备。"); return
             self.resource_manager.lock_devices([c['id'] for c in selected_configs])
             title = f"{system_name} ({', '.join([c['id'] for c in selected_configs])})"
-            
-            # ★★★ 修改点 3：将 `system_name` 作为参数传递给 ControlPanel ★★★
             control_panel = ControlPanel(title, selected_configs, self.resource_manager, system_name)
-            self.control_systems[system_name] = control_panel
-            control_panel.show()
+            self.control_systems[system_name] = control_panel; control_panel.show()
             
     def launch_debugger(self):
         dialog = DeviceSelectionDialog(self.resource_manager, mode='debug', parent=self)
         if dialog.exec():
-            selected_configs = dialog.get_selected_configs()
+            selected_configs = dialog.get_selected_configs(); 
             if not selected_configs: return
-            config = selected_configs[0]
-            device_id = config['id']
-            
-            # ★★★ 修改点 3 (同样应用于调试器)：将调试器ID作为参数传递 ★★★
-            debug_id = f"debug_{device_id}"
-            if debug_id in self.control_systems:
-                self.control_systems[debug_id].activateWindow()
-                return
+            config = selected_configs[0]; device_id = config['id']; debug_id = f"debug_{device_id}"
+            if debug_id in self.control_systems: self.control_systems[debug_id].activateWindow(); return
             self.resource_manager.lock_devices([device_id])
             title = f"设备调试: {config['description']}"
             control_panel = ControlPanel(title, [config], self.resource_manager, debug_id)
-            self.control_systems[debug_id] = control_panel
-            control_panel.show()
+            self.control_systems[debug_id] = control_panel; control_panel.show()
 
 # --- 程序主入口 ---
 if __name__ == '__main__':

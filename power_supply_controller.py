@@ -1,4 +1,4 @@
-# file: power_supply_controller.py
+# file: power_supply_controller.py (已修正为GPD-2303S的2通道版本)
 
 import pyvisa
 import time
@@ -6,14 +6,16 @@ import time
 class GPD4303SPowerSupply:
     """
     一个用于控制 GW Instek GPD-X303S 系列直流电源的类。
+    已适配 GPD-2303S (2通道) 型号。
     """
-    def __init__(self, port, baudrate=9600, timeout=2000):
+    def __init__(self, port, baudrate=9600, timeout=2):
         self.port = port
         self.baudrate = baudrate
-        self.timeout = timeout
+        self.timeout = timeout * 1000 # pyvisa 的 timeout 单位是毫秒
         self.is_connected = False
         self.instrument = None
-        self.num_channels = 4
+        # ★★★ 核心修正 1：将通道数修正为 2 ★★★
+        self.num_channels = 2
         print(f"初始化设备: GPD4303SPowerSupply on {port}")
 
     def connect(self):
@@ -21,8 +23,13 @@ class GPD4303SPowerSupply:
         try:
             rm = pyvisa.ResourceManager()
             self.instrument = rm.open_resource(self.port)
+            
+            self.instrument.read_termination = '\n'
+            self.instrument.write_termination = '\n'
+            
             self.instrument.timeout = self.timeout
             self.instrument.baud_rate = self.baudrate
+            
             idn = self.instrument.query("*IDN?")
             print(f"[{self.__class__.__name__}] 连接成功. 设备信息: {idn.strip()}")
             self.is_connected = True
@@ -41,20 +48,34 @@ class GPD4303SPowerSupply:
     
     def _send_command(self, command):
         if not self.is_connected: return
-        try: self.instrument.write(command)
-        except pyvisa.errors.VisaIOError as e: print(f"发送指令 '{command}' 失败: {e}")
+        try:
+            self.instrument.write(command)
+            time.sleep(0.05)
+        except pyvisa.errors.VisaIOError as e:
+            print(f"发送指令 '{command}' 失败: {e}")
 
     def _query(self, query):
         if not self.is_connected: return None
-        try: return self.instrument.query(query).strip()
-        except pyvisa.errors.VisaIOError as e: print(f"查询 '{query}' 失败: {e}"); return None
+        try:
+            response = self.instrument.query(query).strip()
+            time.sleep(0.05)
+            return response
+        except pyvisa.errors.VisaIOError as e:
+            print(f"查询 '{query}' 失败: {e}")
+            return None
 
     def set_voltage(self, channel, voltage):
-        if not 1 <= channel <= self.num_channels: print(f"错误: 通道 {channel} 无效。"); return
+        # ★★★ 核心修正 2：确保设置的通道号不超出范围 ★★★
+        if not 1 <= channel <= self.num_channels:
+            print(f"错误: 通道 {channel} 无效。有效通道为 1-{self.num_channels}。")
+            return
         self._send_command(f"VSET{channel}:{voltage:.3f}")
 
     def set_current(self, channel, current):
-        if not 1 <= channel <= self.num_channels: print(f"错误: 通道 {channel} 无效。"); return
+        # ★★★ 核心修正 2：确保设置的通道号不超出范围 ★★★
+        if not 1 <= channel <= self.num_channels:
+            print(f"错误: 通道 {channel} 无效。有效通道为 1-{self.num_channels}。")
+            return
         self._send_command(f"ISET{channel}:{current:.3f}")
 
     def set_output(self, enable):
@@ -64,23 +85,29 @@ class GPD4303SPowerSupply:
     def get_voltage(self, channel):
         if not 1 <= channel <= self.num_channels: return 0.0
         response = self._query(f"VOUT{channel}?")
-        try: return float(response) if response is not None else 0.0
-        except ValueError: return 0.0
+        try:
+            return float(response.replace('V', '')) if response is not None else 0.0
+        except (ValueError, AttributeError):
+            return 0.0
 
     def get_current(self, channel):
         if not 1 <= channel <= self.num_channels: return 0.0
         response = self._query(f"IOUT{channel}?")
-        try: return float(response) if response is not None else 0.0
-        except ValueError: return 0.0
+        try:
+            return float(response.replace('A', '')) if response is not None else 0.0
+        except (ValueError, AttributeError):
+            return 0.0
         
     def get_status(self):
         status = {}
         if not self.is_connected:
             status['output_on'] = False
             for i in range(1, self.num_channels + 1):
-                status[f'ch{i}_voltage'] = 0.0; status[f'ch{i}_current'] = 0.0
+                status[f'ch{i}_voltage'] = 0.0
+                status[f'ch{i}_current'] = 0.0
             return status
 
+        # ★★★ 核心修正 3：循环获取状态时，使用正确的通道数 ★★★
         for i in range(1, self.num_channels + 1):
             status[f'ch{i}_voltage'] = self.get_voltage(i)
             status[f'ch{i}_current'] = self.get_current(i)
@@ -89,7 +116,10 @@ class GPD4303SPowerSupply:
         if status_word_str:
             try:
                 status_word = int(status_word_str)
+                # 根据GPD-X303S手册，bit 5 代表CH1/CH2的输出状态
                 status['output_on'] = (status_word & (1 << 5)) != 0
-            except (ValueError, IndexError): status['output_on'] = False
-        else: status['output_on'] = False
+            except (ValueError, IndexError):
+                status['output_on'] = False
+        else:
+            status['output_on'] = False
         return status

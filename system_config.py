@@ -10,7 +10,7 @@ DEVICE_POOL = {
         {
             'id': 'kamoer_pump_1',
             'type': 'kamoer',
-            'port': 'COM5',       # ！！！修改为1号Kamoer泵的实际串口
+            'port': 'COM5',       # ！！！修改为1号Kamoer泵的实际串口 COM？
             'address': 192,
             'description': '卡默尔蠕动泵 #1'
         },
@@ -40,14 +40,14 @@ DEVICE_POOL = {
         {
             'id': 'plunger_pump_1',
             'type': 'oushisheng',
-            'port': 'COM7',       # ！！！修改为1号柱塞泵的实际串口
-            'address': 1,
+            'port': 'COM4',       # ！！！修改为1号柱塞泵的实际串口 
+            'address': 55,
             'description': '欧世盛柱塞泵 #1'
         },
         {
             'id': 'plunger_pump_2',
             'type': 'oushisheng',
-            'port': 'COM8',       # ！！！修改为2号柱塞泵的实际串口
+            'port': 'COM4',       # ！！！修改为2号柱塞泵的实际串口
             'address': 1,
             'description': '欧世盛柱塞泵 #2'
         }
@@ -58,7 +58,7 @@ DEVICE_POOL = {
         {
             'id': 'gpd_power_1',
             'type': 'gpd_4303s',
-            'port': 'COM9', # ！！！修改为电源的实际串口
+            'port': 'ASRL6::INSTR', # ！！！修改为电源的实际串口 ASRL？::INSTR
             'description': '固纬 GPD-4303S 电源'
         }
     ]

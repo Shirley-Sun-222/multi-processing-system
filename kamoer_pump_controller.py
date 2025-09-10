@@ -73,8 +73,8 @@ class KamoerPeristalticPump(BasePump):
     def stop(self):
         print(f"[{self.__class__.__name__}] 正在停止泵...")
         return self._set_pump_state(start=False)
-    
-    def set_parameters(self, speed=None, **kwargs):
+
+    def set_parameters(self, speed=None, direction=None, **kwargs):
         """
         在线设置泵的运行参数。
         """
@@ -82,11 +82,21 @@ class KamoerPeristalticPump(BasePump):
             print("错误: 设备未连接。")
             return False
         
+        success = True
+        # 如果提供了 direction 参数，则设置方向
+        if direction is not None:
+            print(f"[{self.__class__.__name__}] 动态设置方向为: {direction}...")
+            if not self._set_direction(direction):
+                success = False
+            time.sleep(0.05) # 增加延时确保指令执行
+
         # 如果提供了 speed 参数，则设置速度
         if speed is not None:
             print(f"[{self.__class__.__name__}] 动态设置转速为: {speed} RPM...")
-            return self._set_speed(speed)
-        return False # 如果没有提供有效参数，返回失败
+            if not self._set_speed(speed):
+                success = False
+        
+        return success
 
     def get_status(self):
         speed = self._read_real_time_speed()
@@ -160,7 +170,7 @@ class KamoerPeristalticPump(BasePump):
             
     def _read_holding_registers(self, address, count):
         try:
-            r = self.client.read_holding_registers(address, device_id=self.unit_address)
+            r = self.client.read_holding_registers(address, device_id=self.unit_address) #这个地方一直有bug，如出错，尝试增在address后增加count参数
             return None if r.isError() else r.registers
         except ModbusException as e:
             print(f"[{self.__class__.__name__}] 错误: {e}")
