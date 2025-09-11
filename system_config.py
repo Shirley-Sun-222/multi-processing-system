@@ -22,15 +22,15 @@ SYSTEM_SETS = [
         "subsystem_A": {
             "channel": 1,
             "pumps": [
-                {'id': 'kamoer_pump_1A', 'type': 'kamoer', 'port': 'COM5', 'address': 192, 'description': '系统1A-蠕动泵 #1'},
+                {'id': 'kamoer_pump_1A', 'type': 'kamoer', 'port': 'COM3', 'address': 192, 'description': '系统1A-蠕动泵 #1'},
                 {'id': 'kamoer_pump_1B', 'type': 'kamoer', 'port': 'COM4', 'address': 192, 'description': '系统1A-蠕动泵 #2'},
-                {'id': 'plunger_pump_1A', 'type': 'oushisheng', 'port': 'COM4', 'address': 55, 'description': '系统1A-柱塞泵 #1'}
+                {'id': 'plunger_pump_1A', 'type': 'oushisheng', 'port': 'COM5', 'address': 1, 'description': '系统1A-柱塞泵 #1'}
             ]
         },
         "subsystem_B": {
             "channel": 2,
             "pumps": [
-                {'id': 'kamoer_pump_1C', 'type': 'kamoer', 'port': 'COM5', 'address': 192, 'description': '系统1B-蠕动泵 #3'},
+                {'id': 'kamoer_pump_1C', 'type': 'kamoer', 'port': 'COM5', 'address': 1, 'description': '系统1B-蠕动泵 #3'},
                 {'id': 'kamoer_pump_1D', 'type': 'kamoer', 'port': 'COM6', 'address': 192, 'description': '系统1B-蠕动泵 #4'},
                 {'id': 'plunger_pump_1B', 'type': 'oushisheng', 'port': 'COM4', 'address': 55, 'description': '系统1B-柱塞泵 #2'}
             ]
