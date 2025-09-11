@@ -27,6 +27,7 @@ class OushishengPlungerPump(BasePump):
         if self.client.connect():
             self.is_connected = True
             print(f"[{self.__class__.__name__}] 连接成功。")
+            # 启用485控制
             return True
         else:
             self.is_connected = False

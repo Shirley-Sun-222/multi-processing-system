@@ -10,7 +10,7 @@ DEVICE_POOL = {
         {
             'id': 'kamoer_pump_1',
             'type': 'kamoer',
-            'port': 'COM5',       # ！！！修改为1号Kamoer泵的实际串口 COM？
+            'port': 'COM9',       # ！！！修改为1号Kamoer泵的实际串口 COM？
             'address': 192,
             'description': '卡默尔蠕动泵 #1'
         },
@@ -24,7 +24,7 @@ DEVICE_POOL = {
         {
             'id': 'kamoer_pump_3',
             'type': 'kamoer',
-            'port': 'COM5',       # ！！！修改为3号Kamoer泵的实际串口
+            'port': 'COM10',       # ！！！修改为3号Kamoer泵的实际串口
             'address': 192,
             'description': '卡默尔蠕动泵 #3'
         },
@@ -40,15 +40,15 @@ DEVICE_POOL = {
         {
             'id': 'plunger_pump_1',
             'type': 'oushisheng',
-            'port': 'COM4',       # ！！！修改为1号柱塞泵的实际串口 
-            'address': 55,
+            'port': 'COM5',       # ！！！修改为1号柱塞泵的实际串口 
+            'address': 1,
             'description': '欧世盛柱塞泵 #1'
         },
         {
             'id': 'plunger_pump_2',
             'type': 'oushisheng',
-            'port': 'COM4',       # ！！！修改为2号柱塞泵的实际串口
-            'address': 1,
+            'port': 'COM9',       # ！！！修改为2号柱塞泵的实际串口
+            'address': 2,
             'description': '欧世盛柱塞泵 #2'
         }
     ],

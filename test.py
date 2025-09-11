@@ -1,59 +1,56 @@
-# file: manual_test.py
-
-import struct
+# file: set_pump_address.py
 from pymodbus.client import ModbusSerialClient
 
-# --- 请在这里配置您的泵的信息 ---
-PUMP_PORT = 'COM5'  # 1号Kamoer泵的串口
-PUMP_ADDRESS = 192  # Kamoer泵的Modbus地址
+# --- 請修改以下配置 ---
+PUMP_PORT = 'COM5'  # ！！！請修改為您連接的泵的實際COM端口！！！
+NEW_ADDRESS = 1     # ！！！請設置您想要的新地址 (1-254之間的十進制數)！！！
+# ---------------------
 
-# ------------------------------------
+# 根據協議，修改地址時必須使用通用地址 0x55 (十進制 85)
+UNIVERSAL_ADDRESS = 85
+# 根據協議，地址設定功能對應的寄存器是 9
+ADDRESS_REGISTER = 9
 
-client = ModbusSerialClient(port=PUMP_PORT, baudrate=9600, timeout=1)
+# 初始化Modbus客戶端
+client = ModbusSerialClient(
+    port=PUMP_PORT,
+    baudrate=9600,
+    timeout=1,
+    parity='N',
+    stopbits=1,
+    bytesize=8
+)
 
-print(f"正在连接 {PUMP_PORT}...")
-if not client.connect():
-    print("连接失败！请检查串口号是否正确，设备是否已上电。")
-    exit()
-
-print("连接成功！")
+print(f"正在嘗試連接端口 {PUMP_PORT}...")
 
 try:
-    # 步骤 1: 启用485控制 (根据手册，这是必须的第一步)
-    print("正在启用 485 控制...")
-    response = client.write_coil(0x1004, True, device_id=PUMP_ADDRESS)
-    if response.isError():
-        print("!!! 启用 485 控制失败 !!!")
-        print(f"错误详情: {response}")
-    else:
-        print(">>> 485 控制已启用。")
+    if not client.connect():
+        print("連接失敗！請檢查：")
+        print(f"1. COM端口 '{PUMP_PORT}' 是否正確。")
+        print("2. 泵是否已上電，並且是唯一連接到電腦的設備。")
+        exit()
 
-    # 步骤 2: 尝试读取单个寄存器 (这步应该会成功)
-    print("\n正在尝试读取单个寄存器 (地址 0x3005)...")
-    response = client.read_holding_registers(0x3005, 1, device_id=PUMP_ADDRESS)
-    if response.isError():
-        print("!!! 读取单个寄存器失败 !!!")
-        print(f"错误详情: {response}")
-    else:
-        print(f">>> 成功读取单个寄存器，值为: {response.registers}")
+    print("連接成功！")
+    print(f"準備發送指令：使用通用地址 {UNIVERSAL_ADDRESS} 將新地址設置為 {NEW_ADDRESS}...")
 
-    # 步骤 3: 尝试一次性读取两个寄存器 (这步很可能会复现报错)
-    print("\n正在尝试一次性读取两个寄存器 (地址 0x3005, 数量 2)...")
-    response = client.read_holding_registers(0x3005, 2, device_id=PUMP_ADDRESS)
+    # 發送寫入指令來設定新地址
+    # client.write_register(register_address, new_value, device_id)
+    response = client.write_register(
+        address=ADDRESS_REGISTER,
+        value=NEW_ADDRESS,
+        device_id=UNIVERSAL_ADDRESS
+    )
+
     if response.isError():
-        print("!!! 一次性读取两个寄存器失败 !!!")
-        print(f"错误详情: {response}")
+        print(f"!!! 地址設置失敗 !!!")
+        print(f"設備返回錯誤: {response}")
     else:
-        print(f">>> 成功一次性读取两个寄存器，值为: {response.registers}")
-        float_bytes = struct.pack('>HH', *response.registers)
-        speed = struct.unpack('>f', float_bytes)[0]
-        print(f">>> 解析出的实时速度为: {speed:.2f} RPM")
+        print(">>> 地址設置成功！")
+        print(f">>> 請重啟泵的電源，然後在 system_config.py 中將地址更新為 {NEW_ADDRESS}。")
 
 except Exception as e:
-    print(f"\n!!!!!! 在测试过程中发生严重错误 !!!!!!!")
-    print(f"错误类型: {type(e).__name__}")
-    print(f"错误信息: {e}")
+    print(f"發生意外錯誤: {e}")
 
 finally:
     client.close()
-    print("\n连接已关闭。")
+    print("連接已關閉。")
