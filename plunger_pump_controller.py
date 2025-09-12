@@ -73,15 +73,20 @@ class OushishengPlungerPump(BasePump):
             print(f"[{self.__class__.__name__}] 动态设置流量为: {flow_rate} ml/min...")
             return self._set_flow_rate(flow_rate)
         return False
-
+        
     def get_status(self):
         is_running = self._is_running()
         pressure = self._read_pressure()
-        flow_rate = self._read_set_flow_rate()
+        set_flow_rate = self._read_set_flow_rate()
+
+        # ★★★ 核心修正: 如果泵没有运行，实际流量为0 ★★★
+        actual_flow_rate = set_flow_rate if is_running else 0.0
+        
         return {
             "is_running": is_running,
             "pressure_mpa": pressure if pressure is not None else 0.0,
-            "flow_rate_ml_min": flow_rate if flow_rate is not None else 0.0
+            "flow_rate_ml_min": actual_flow_rate if actual_flow_rate is not None else 0.0,
+            "speed_rpm": 0.0 # 柱塞泵没有转速概念
         }
 
     # --- 内部辅助函数 ---
