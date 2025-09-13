@@ -69,8 +69,8 @@
 ├── requirements.txt            # 项目依赖库列表
 ├── build.bat                   # 一键打包成EXE的批处理脚本
 ├── build.spec                  # PyInstaller的配置文件
-├── address.py                  # 用于修改泵地址的独立工具脚本
-└── 资源指南.md                 # 关于如何打包的详细中文说明
+├── address.py                  # 用于修改欧世盛泵地址的独立工具脚本
+└── 打包exe指南.md                 # 关于如何打包的详细中文说明
 ```
 
 ## 🚀 如何运行
@@ -237,8 +237,8 @@ This design ensures that I/O-intensive hardware communication does not block the
 ├── requirements.txt            # List of project dependencies
 ├── build.bat                   # Batch script for one-click packaging into an EXE
 ├── build.spec                  # Configuration file for PyInstaller
-├── address.py                  # A standalone utility script to change pump Modbus addresses
-└── 资源指南.md                 # A detailed guide on packaging (in Chinese)
+├── address.py                  # A standalone utility script to change Oushisheng pump Modbus addresses
+└── 打包exe指南.md                 # A detailed guide on packaging (in Chinese)
 ```
 
 ## 🚀 How to Run
