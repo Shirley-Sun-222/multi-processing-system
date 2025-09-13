@@ -97,14 +97,18 @@ class KamoerPeristalticPump(BasePump):
                 success = False
         
         return success
-
+        
     def get_status(self):
         speed = self._read_real_time_speed()
-        # 对于这个泵，我们无法直接读取运行状态，但可以通过速度是否为零来近似判断
-        is_running = speed is not None and speed > 0.1 # 设定一个小的阈值
+        is_running = speed is not None and speed > 0.01
+
+        # ★★★ 核心修正: 如果泵没有运行，实际转速为0 ★★★
+        actual_speed = speed if is_running else 0.0
+        
         return {
             "is_running": is_running,
-            "speed_rpm": speed if speed is not None else 0.0
+            "speed_rpm": actual_speed if actual_speed is not None else 0.0,
+            "flow_rate_ml_min": 0.0 # 蠕动泵主要通过转速控制
         }
 
     # --- 内部辅助函数 (加上下划线表示内部使用) ---
